@@ -1,0 +1,180 @@
+// This is your Next.js NextAuth / Prisma schema foundation
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =======================
+// ENUMS
+// =======================
+enum Role {
+  CUSTOMER
+  DEALER
+  ADMIN
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SubscriptionTier {
+  FREEMIUM
+  BASIC
+  PRO
+}
+
+enum ProjectType {
+  RESIDENTIAL
+  COMMERCIAL
+}
+
+enum ProjectStatus {
+  DRAFT
+  ESTIMATED
+  RFQ_SUBMITTED
+  QUOTED
+  CLOSED
+}
+
+enum QuoteRequestStatus {
+  OPEN
+  CLOSED
+  EXPIRED
+}
+
+enum QuoteStatus {
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+}
+
+// =======================
+// CORE MODELS
+// =======================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  phone         String?
+  password      String    // bcrypt hashed
+  role          Role      @default(CUSTOMER)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  dealerProfile DealerProfile?
+  projects      Project[]
+  quotes        Quote[]
+  
+  @@index([email])
+  @@index([role])
+}
+
+model DealerProfile {
+  id                 String           @id @default(cuid())
+  userId             String           @unique
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  companyName        String
+  gstin              String?          @unique // Crucial for Phase 0 anti-fraud
+  address            String
+  city               String
+  state              String
+  pincode            String
+  
+  serviceAreas       String[]         // Array of serviceable pincodes
+  brandsSold         String[]         // e.g., ["Polycab", "Finolex"]
+  
+  approvalStatus     ApprovalStatus   @default(PENDING)
+  subscriptionTier   SubscriptionTier @default(FREEMIUM)
+  quotesThisMonth    Int              @default(0)
+  
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([city])
+  @@index([approvalStatus])
+}
+
+model Project {
+  id               String           @id @default(cuid())
+  ownerId          String
+  owner            User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  projectName      String
+  projectType      ProjectType      @default(RESIDENTIAL)
+  status           ProjectStatus    @default(DRAFT)
+  
+  // The shape of this JSON MUST be validated by Zod on the backend
+  inputData        Json             
+  bomData          Json?            
+  totalEstimate    Float?
+  
+  quoteRequest     QuoteRequest?
+  
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+}
+
+model QuoteRequest {
+  id               String             @id @default(cuid())
+  projectId        String             @unique
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  status           QuoteRequestStatus @default(OPEN)
+  visibilityCity   String             // Essential for localizing dealer leads
+  visibilityPincode String?
+  
+  quotes           Quote[]
+  
+  createdAt        DateTime           @default(now())
+  expiresAt        DateTime?
+
+  @@index([status])
+  @@index([visibilityCity])
+}
+
+model Quote {
+  id               String       @id @default(cuid())
+  quoteRequestId   String
+  quoteRequest     QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  dealerId         String
+  dealer           User         @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  
+  totalPrice       Float
+  brandOffered     String       // Prevent "race to the bottom" unbranded materials
+  deliveryDays     Int?
+  details          String?      @db.Text
+  status           QuoteStatus  @default(SUBMITTED)
+  
+  createdAt        DateTime     @default(now())
+  validUntil       DateTime?
+
+  @@index([dealerId])
+  @@index([quoteRequestId])
+}
+
+model PriceIndex {
+  id               String   @id @default(cuid())
+  wireType         String   // e.g., "1.5 sq mm FR PVC"
+  brand            String   // e.g., "Polycab"
+  unitPrice        Float    // Per meter
+  unit             String   @default("meter")
+  
+  effectiveDate    DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([wireType, brand])
+  @@index([wireType])
+}
