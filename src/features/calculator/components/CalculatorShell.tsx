@@ -23,7 +23,7 @@
 // ============================================================================
 
 import { useRef, useState, useTransition } from "react";
-import { AlertCircle, ChevronDown, ChevronUp, SlidersHorizontal, X } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { PresetCards } from "./PresetCards";
@@ -137,6 +137,7 @@ export function CalculatorShell() {
           onSelect={handlePresetSelect}
           onCustomize={handlePresetCustomize}
           activePresetId={activePresetId}
+          disabled={isPending}
         />
       </section>
 
@@ -186,18 +187,35 @@ export function CalculatorShell() {
       {/* ------------------------------------------------------------------ */}
       {/* Section 3: Result                                                   */}
       {/* ------------------------------------------------------------------ */}
-      {result && (
+      {(isPending || result) && (
         <section ref={resultRef}>
           <Separator className="mb-6" />
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold">Bill of Materials</h2>
-            <p className="text-sm text-muted-foreground">
-              {result.circuits.length > 0
-                ? `${result.totalCircuits} circuits · IS 732:2019 compliant`
-                : "No circuits generated"}
-            </p>
-          </div>
-          <BOMResultView result={result} />
+
+          {/* First calculation — no prior result, show full-area spinner */}
+          {isPending && !result && (
+            <div className="flex items-center justify-center gap-3 py-16 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Calculating estimate…</span>
+            </div>
+          )}
+
+          {/* Result — dimmed + spinner badge while recalculating, full when idle */}
+          {result && (
+            <div className={isPending ? "pointer-events-none opacity-50 transition-opacity" : "transition-opacity"}>
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">Bill of Materials</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {result.circuits.length > 0
+                      ? `${result.totalCircuits} circuits · IS 732:2019 compliant`
+                      : "No circuits generated"}
+                  </p>
+                </div>
+                {isPending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              </div>
+              <BOMResultView result={result} />
+            </div>
+          )}
         </section>
       )}
     </div>

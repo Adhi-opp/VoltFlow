@@ -105,15 +105,16 @@ interface PresetCardsProps {
   onSelect: (layout: LayoutInput) => void;
   onCustomize: (layout: LayoutInput) => void;
   activePresetId: string | null;
+  disabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function PresetCards({ onSelect, onCustomize, activePresetId }: PresetCardsProps) {
+export function PresetCards({ onSelect, onCustomize, activePresetId, disabled }: PresetCardsProps) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-3", disabled && "pointer-events-none opacity-60")}>
       {PRESETS.map((preset) => {
         const isActive = activePresetId === preset.id;
         return (
@@ -152,6 +153,7 @@ export function PresetCards({ onSelect, onCustomize, activePresetId }: PresetCar
               <Button
                 size="sm"
                 className="flex-1"
+                disabled={disabled}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelect(preset.layout);
@@ -163,6 +165,7 @@ export function PresetCards({ onSelect, onCustomize, activePresetId }: PresetCar
               <Button
                 size="sm"
                 variant="outline"
+                disabled={disabled}
                 onClick={(e) => {
                   e.stopPropagation();
                   onCustomize(preset.layout);
