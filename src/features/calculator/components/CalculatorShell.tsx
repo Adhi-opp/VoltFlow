@@ -39,6 +39,7 @@ import type { LayoutInput } from "../layoutTypes";
 
 export function CalculatorShell() {
   const [result, setResult] = useState<BOMResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formDefaults, setFormDefaults] = useState<Partial<LayoutInput> | undefined>(undefined);
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
@@ -47,19 +48,21 @@ export function CalculatorShell() {
   const resultRef = useRef<HTMLDivElement>(null);
 
   // -------------------------------------------------------------------------
-  // Engine runner
+  // Engine runner — delegates to Server Action; engine never runs in browser
   // -------------------------------------------------------------------------
 
   function runEngine(layout: LayoutInput) {
-    startTransition(() => {
-      const input = buildCalculatorInput(layout);
-      const bomResult = calculateBOM(input);
-      setResult(bomResult);
-
-      // Scroll result into view after paint
-      requestAnimationFrame(() => {
-        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+    setError(null);
+    startTransition(async () => {
+      const res = await generateEstimateAction(layout);
+      if (res.success) {
+        setResult(res.data);
+        requestAnimationFrame(() => {
+          resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      } else {
+        setError(res.error);
+      }
     });
   }
 
@@ -168,6 +171,16 @@ export function CalculatorShell() {
             />
           </div>
         </section>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Error banner                                                        */}
+      {/* ------------------------------------------------------------------ */}
+      {error && (
+        <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
       )}
 
       {/* ------------------------------------------------------------------ */}
