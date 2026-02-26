@@ -2,11 +2,11 @@
 
 import { Prisma, QuoteRequestStatus } from "@prisma/client";
 import { z } from "zod";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 const submitQuoteSchema = z.object({
   quoteRequestId: z.string().min(1),
-  dealerId: z.string().min(1),
   clientRequestId: z.string().uuid(),
   totalPrice: z.number().positive(),
   brandOffered: z.string().trim().min(1).max(120),
@@ -19,6 +19,8 @@ export type SubmitQuoteInput = z.infer<typeof submitQuoteSchema>;
 
 export type SubmitQuoteErrorCode =
   | "VALIDATION_ERROR"
+  | "UNAUTHENTICATED"
+  | "FORBIDDEN"
   | "NOT_FOUND"
   | "RFQ_CLOSED"
   | "RFQ_EXPIRED"
@@ -132,7 +134,10 @@ function mapOutcomeToResult(outcome: TransactionOutcome): SubmitQuoteResult {
   }
 }
 
-async function submitQuoteTransaction(input: SubmitQuoteInput): Promise<TransactionOutcome> {
+async function submitQuoteTransaction(
+  input: SubmitQuoteInput,
+  dealerId: string
+): Promise<TransactionOutcome> {
   const now = new Date();
 
   return prisma.$transaction(
@@ -145,7 +150,7 @@ async function submitQuoteTransaction(input: SubmitQuoteInput): Promise<Transact
       if (existingByRequestId) {
         if (
           existingByRequestId.quoteRequestId === input.quoteRequestId &&
-          existingByRequestId.dealerId === input.dealerId
+          existingByRequestId.dealerId === dealerId
         ) {
           return { kind: "IDEMPOTENT", quoteId: existingByRequestId.id } as const;
         }
@@ -180,7 +185,7 @@ async function submitQuoteTransaction(input: SubmitQuoteInput): Promise<Transact
       const existingDealerQuote = await tx.quote.findFirst({
         where: {
           quoteRequestId: input.quoteRequestId,
-          dealerId: input.dealerId,
+          dealerId,
         },
         select: { id: true },
       });
@@ -190,7 +195,7 @@ async function submitQuoteTransaction(input: SubmitQuoteInput): Promise<Transact
       }
 
       const dealerProfile = await tx.dealerProfile.findUnique({
-        where: { userId: input.dealerId },
+        where: { userId: dealerId },
         select: { id: true },
       });
 
@@ -201,7 +206,7 @@ async function submitQuoteTransaction(input: SubmitQuoteInput): Promise<Transact
       const createdQuote = await tx.quote.create({
         data: {
           quoteRequestId: input.quoteRequestId,
-          dealerId: input.dealerId,
+          dealerId,
           clientRequestId: input.clientRequestId,
           totalPrice: input.totalPrice,
           brandOffered: input.brandOffered,
@@ -230,7 +235,7 @@ async function submitQuoteTransaction(input: SubmitQuoteInput): Promise<Transact
       }
 
       await tx.dealerProfile.update({
-        where: { userId: input.dealerId },
+        where: { userId: dealerId },
         data: {
           quotesThisMonth: {
             increment: 1,
@@ -247,6 +252,24 @@ async function submitQuoteTransaction(input: SubmitQuoteInput): Promise<Transact
 }
 
 export async function submitQuoteAction(raw: SubmitQuoteInput): Promise<SubmitQuoteResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      errorCode: "UNAUTHENTICATED",
+      error: "You must be signed in to submit a quote.",
+    };
+  }
+
+  if (session.user.role !== "DEALER") {
+    return {
+      success: false,
+      errorCode: "FORBIDDEN",
+      error: "Only dealer accounts can submit quotes.",
+    };
+  }
+
+  const dealerId = session.user.id;
   const parsed = submitQuoteSchema.safeParse(raw);
 
   if (!parsed.success) {
@@ -262,7 +285,7 @@ export async function submitQuoteAction(raw: SubmitQuoteInput): Promise<SubmitQu
 
   for (let retry = 0; retry <= MAX_SERIALIZATION_RETRIES; retry += 1) {
     try {
-      const outcome = await submitQuoteTransaction(parsed.data);
+      const outcome = await submitQuoteTransaction(parsed.data, dealerId);
       return mapOutcomeToResult(outcome);
     } catch (error) {
       if (isRetryableSerializationError(error)) {
