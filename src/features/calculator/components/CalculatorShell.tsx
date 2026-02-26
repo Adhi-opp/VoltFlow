@@ -30,7 +30,8 @@ import { PresetCards } from "./PresetCards";
 import { CalculatorForm } from "./CalculatorForm";
 import { BOMResultView } from "./BOMResultView";
 import { generateEstimateAction } from "../actions";
-import type { BOMResult } from "../type";
+import type { EnrichedBOMResult } from "../costEngine";
+import type { EstimateActionErrorCode } from "../actions";
 import type { LayoutInput } from "../layoutTypes";
 
 // ---------------------------------------------------------------------------
@@ -38,8 +39,12 @@ import type { LayoutInput } from "../layoutTypes";
 // ---------------------------------------------------------------------------
 
 export function CalculatorShell() {
-  const [result, setResult] = useState<BOMResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<EnrichedBOMResult | null>(null);
+  const [error, setError] = useState<{
+    message: string;
+    code: EstimateActionErrorCode;
+    missingCodes?: string[];
+  } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formDefaults, setFormDefaults] = useState<Partial<LayoutInput> | undefined>(undefined);
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
@@ -61,7 +66,11 @@ export function CalculatorShell() {
           resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
       } else {
-        setError(res.error);
+        setError({
+          message: res.error,
+          code: res.errorCode,
+          missingCodes: res.missingCodes,
+        });
       }
     });
   }
@@ -180,7 +189,14 @@ export function CalculatorShell() {
       {error && (
         <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <div className="space-y-1">
+            <p>{error.message}</p>
+            {error.code === "PRICING_DATA_MISSING" && error.missingCodes && error.missingCodes.length > 0 && (
+              <p className="text-xs">
+                Missing price codes: {error.missingCodes.join(", ")}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

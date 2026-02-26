@@ -135,6 +135,8 @@ model QuoteRequest {
   status           QuoteRequestStatus @default(OPEN)
   visibilityCity   String             // Essential for localizing dealer leads
   visibilityPincode String?
+  maxQuotes        Int                @default(5)
+  quoteCount       Int                @default(0)
   
   quotes           Quote[]
   
@@ -151,6 +153,7 @@ model Quote {
   quoteRequest     QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
   dealerId         String
   dealer           User         @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  clientRequestId  String       @unique
   
   totalPrice       Float
   brandOffered     String       // Prevent "race to the bottom" unbranded materials
@@ -163,6 +166,16 @@ model Quote {
 
   @@index([dealerId])
   @@index([quoteRequestId])
+  @@unique([quoteRequestId, dealerId])
+}
+
+model RegulatoryPhasePolicy {
+  id                     String   @id @default(cuid())
+  cityKey                String   @unique
+  connectedLoadThresholdKw Float
+  isActive               Boolean  @default(true)
+  updatedAt              DateTime @updatedAt
+  createdAt              DateTime @default(now())
 }
 
 model PriceIndex {

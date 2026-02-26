@@ -1,29 +1,10 @@
 "use client";
 
-// src/features/calculator/components/BOMResultView.tsx
-// ============================================================================
-// BOM RESULT VIEW — Tabbed display of BOMResult output
-// ============================================================================
-// Renders the full output of calculateBOM() in three tabs:
-//   1. BOM Items  — grouped by category, with quantities
-//   2. Load Breakdown — per-room connected load and max demand
-//   3. Circuits   — every circuit with gauge, MCB rating, wire length
-//
-// Also renders:
-//   - SummaryBar: 4 stat tiles (Connected Load, Max Demand, Phase, Circuits)
-//   - Warnings panel (amber) when result.warnings.length > 0
-//   - Disclaimer footer
-// ============================================================================
-
-import { AlertTriangle, Zap, Activity, GitBranch, LayoutGrid } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
+import { Activity, AlertTriangle, GitBranch, LayoutGrid, Zap } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
-import type { BOMResult, BOMItem } from "../type";
-
-// ---------------------------------------------------------------------------
-// Category display config — controls order and labels
-// ---------------------------------------------------------------------------
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { EnrichedBOMResult } from "../costEngine";
+import type { BOMItem } from "../type";
 
 const CATEGORY_ORDER = [
   "WIRE",
@@ -47,30 +28,30 @@ const CATEGORY_LABELS: Record<string, string> = {
   SWITCHGEAR: "Switchgear",
 };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function formatKw(kw: number): string {
   return `${kw.toFixed(2)} kW`;
+}
+
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
 function getQuantityLabel(item: BOMItem): string {
   switch (item.category) {
     case "WIRE":
-      return `${item.totalMeters.toFixed(0)} m (${item.coilsRequired} coil${item.coilsRequired !== 1 ? "s" : ""} × ${item.coilLengthMeters}m)`;
+      return `Exact ${item.totalMeters.toFixed(0)} m | Buy ${item.coilsRequired} coil${item.coilsRequired !== 1 ? "s" : ""} (${item.purchasableMeters.toFixed(0)} m) | Surplus ${item.surplusMeters.toFixed(0)} m`;
     case "EARTH_WIRE":
-      return `${item.totalMeters.toFixed(0)} m (${item.coilsRequired} coil${item.coilsRequired !== 1 ? "s" : ""} × ${item.coilLengthMeters}m)`;
+      return `Exact ${item.totalMeters.toFixed(0)} m | Buy ${item.coilsRequired} coil${item.coilsRequired !== 1 ? "s" : ""} (${item.purchasableMeters.toFixed(0)} m) | Surplus ${item.surplusMeters.toFixed(0)} m`;
     case "CONDUIT":
       return `${item.totalMeters.toFixed(0)} m`;
     default:
-      return `× ${(item as { quantity: number }).quantity}`;
+      return `x ${(item as { quantity: number }).quantity}`;
   }
 }
-
-// ---------------------------------------------------------------------------
-// SummaryBar
-// ---------------------------------------------------------------------------
 
 interface StatTileProps {
   icon: React.ReactNode;
@@ -93,8 +74,8 @@ function StatTile({ icon, label, value, highlight }: StatTileProps) {
   );
 }
 
-function SummaryBar({ result }: { result: BOMResult }) {
-  const isThreePhase = result.recommendedPhase === "THREE";
+function SummaryBar({ result }: { result: EnrichedBOMResult }) {
+  const isThreePhase = result.phaseDecision.finalRecommendation === "THREE";
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <StatTile
@@ -122,9 +103,68 @@ function SummaryBar({ result }: { result: BOMResult }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// BOM Items Tab
-// ---------------------------------------------------------------------------
+function PricingSummaryCard({ result }: { result: EnrichedBOMResult }) {
+  return (
+    <div className="space-y-3 rounded-lg border bg-card p-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Material Cost</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums">{formatCurrency(result.pricing.materialCost)}</p>
+        </div>
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Labor Cost</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums">{formatCurrency(result.pricing.laborCost)}</p>
+        </div>
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total Estimate</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-primary">
+            {formatCurrency(result.pricing.totalEstimate)}
+          </p>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        This estimate includes purchasable-unit surplus: {result.pricing.surplusMetersTotal.toFixed(0)} m
+        {" "}({formatCurrency(result.pricing.surplusValueTotal)}). Ask dealers for cut-length optimization where applicable.
+      </p>
+    </div>
+  );
+}
+
+function LaborBreakdownCard({ result }: { result: EnrichedBOMResult }) {
+  const b = result.pricing.laborBreakdown;
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Labor Breakdown</p>
+      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+        <p>Base Visit: <span className="font-mono">{formatCurrency(b.baseVisit)}</span></p>
+        <p>Lighting Points: <span className="font-mono">{formatCurrency(b.lightingPoints)}</span></p>
+        <p>15A Points: <span className="font-mono">{formatCurrency(b.power15APoints)}</span></p>
+        <p>Heavy Circuits: <span className="font-mono">{formatCurrency(b.heavyCircuits)}</span></p>
+        <p>Cooking Circuits: <span className="font-mono">{formatCurrency(b.cookingCircuits)}</span></p>
+        <p>Conduit Run: <span className="font-mono">{formatCurrency(b.conduitMeters)}</span></p>
+        <p>Extra Floors: <span className="font-mono">{formatCurrency(b.extraFloors)}</span></p>
+        <p>Wiring Multiplier: <span className="font-mono">{b.wiringModeMultiplier.toFixed(2)}x</span></p>
+      </div>
+    </div>
+  );
+}
+
+function PhaseDecisionNotice({ result }: { result: EnrichedBOMResult }) {
+  const isRegulatoryOverride =
+    result.phaseDecision.regulatoryRecommendation === "THREE" &&
+    result.phaseDecision.engineeringRecommendation === "SINGLE";
+
+  if (!isRegulatoryOverride) return null;
+
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+      3-Phase recommended: engineering demand is within safe limits ({formatKw(result.maxDemandKw)}),
+      but local DISCOM policy ({result.phaseDecision.regulatoryPolicyKey}) typically requires 3-Phase when
+      connected load exceeds {result.phaseDecision.connectedLoadThresholdKw.toFixed(1)} kW.
+      Your connected load is {formatKw(result.totalConnectedLoadKw)}.
+    </div>
+  );
+}
 
 function BOMItemsTab({ items }: { items: BOMItem[] }) {
   const grouped = new Map<string, BOMItem[]>();
@@ -149,10 +189,7 @@ function BOMItemsTab({ items }: { items: BOMItem[] }) {
             <table className="w-full text-sm">
               <tbody>
                 {catItems.map((item, idx) => (
-                  <tr
-                    key={idx}
-                    className="border-b last:border-0 hover:bg-muted/40 transition-colors"
-                  >
+                  <tr key={idx} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                     <td className="px-3 py-2.5 text-foreground">{item.description}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
                       {getQuantityLabel(item)}
@@ -168,11 +205,7 @@ function BOMItemsTab({ items }: { items: BOMItem[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Load Breakdown Tab
-// ---------------------------------------------------------------------------
-
-function LoadBreakdownTab({ result }: { result: BOMResult }) {
+function LoadBreakdownTab({ result }: { result: EnrichedBOMResult }) {
   const { loadBreakdown } = result;
 
   return (
@@ -190,17 +223,11 @@ function LoadBreakdownTab({ result }: { result: BOMResult }) {
         </thead>
         <tbody>
           {loadBreakdown.map((row) => (
-            <tr key={row.roomId} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
+            <tr key={row.roomId} className="border-b transition-colors last:border-0 hover:bg-muted/40">
               <td className="px-3 py-2.5 font-medium">{row.roomName}</td>
-              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                {row.lightingLoadWatts} W
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                {row.powerLoadWatts} W
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                {row.heavyLoadWatts} W
-              </td>
+              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">{row.lightingLoadWatts} W</td>
+              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">{row.powerLoadWatts} W</td>
+              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">{row.heavyLoadWatts} W</td>
               <td className="px-3 py-2.5 text-right font-mono">
                 {(row.totalConnectedLoadWatts / 1000).toFixed(2)} kW
               </td>
@@ -212,15 +239,9 @@ function LoadBreakdownTab({ result }: { result: BOMResult }) {
         </tbody>
         <tfoot>
           <tr className="border-t bg-muted/50 font-semibold">
-            <td className="px-3 py-2.5" colSpan={4}>
-              Total
-            </td>
-            <td className="px-3 py-2.5 text-right font-mono">
-              {formatKw(result.totalConnectedLoadKw)}
-            </td>
-            <td className="px-3 py-2.5 text-right font-mono text-primary">
-              {formatKw(result.maxDemandKw)}
-            </td>
+            <td className="px-3 py-2.5" colSpan={4}>Total</td>
+            <td className="px-3 py-2.5 text-right font-mono">{formatKw(result.totalConnectedLoadKw)}</td>
+            <td className="px-3 py-2.5 text-right font-mono text-primary">{formatKw(result.maxDemandKw)}</td>
           </tr>
         </tfoot>
       </table>
@@ -228,13 +249,7 @@ function LoadBreakdownTab({ result }: { result: BOMResult }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Circuits Tab
-// ---------------------------------------------------------------------------
-
-function CircuitsTab({ result }: { result: BOMResult }) {
-  const { circuits } = result;
-
+function CircuitsTab({ result }: { result: EnrichedBOMResult }) {
   return (
     <div className="overflow-hidden rounded-md border">
       <table className="w-full text-sm">
@@ -249,24 +264,16 @@ function CircuitsTab({ result }: { result: BOMResult }) {
           </tr>
         </thead>
         <tbody>
-          {circuits.map((c) => (
-            <tr key={c.circuitId} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-              <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
-                {c.circuitId}
-              </td>
-              <td className="px-3 py-2.5">{c.roomName}</td>
+          {result.circuits.map((circuit) => (
+            <tr key={circuit.circuitId} className="border-b transition-colors last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{circuit.circuitId}</td>
+              <td className="px-3 py-2.5">{circuit.roomName}</td>
               <td className="px-3 py-2.5 text-right font-mono text-xs">
-                {c.wireGauge.replace("SQ_MM_", "").replace("_", ".")} mm²
+                {circuit.wireGauge.replace("SQ_MM_", "").replace("_", ".")} mm2
               </td>
-              <td className="px-3 py-2.5 text-right font-mono text-xs">
-                {c.mcbRatingAmps}A
-              </td>
-              <td className="px-3 py-2.5 text-right text-muted-foreground">
-                {c.pointCount}
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono">
-                {c.wireLengthMeters.toFixed(1)}
-              </td>
+              <td className="px-3 py-2.5 text-right font-mono text-xs">{circuit.mcbRatingAmps}A</td>
+              <td className="px-3 py-2.5 text-right text-muted-foreground">{circuit.pointCount}</td>
+              <td className="px-3 py-2.5 text-right font-mono">{circuit.wireLengthMeters.toFixed(1)}</td>
             </tr>
           ))}
         </tbody>
@@ -275,12 +282,9 @@ function CircuitsTab({ result }: { result: BOMResult }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Warnings Panel
-// ---------------------------------------------------------------------------
-
 function WarningsPanel({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null;
+
   return (
     <div className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
@@ -289,9 +293,9 @@ function WarningsPanel({ warnings }: { warnings: string[] }) {
           Notices ({warnings.length})
         </p>
         <ul className="space-y-0.5">
-          {warnings.map((w, i) => (
-            <li key={i} className="text-xs text-amber-700 dark:text-amber-400">
-              {w}
+          {warnings.map((warning, index) => (
+            <li key={index} className="text-xs text-amber-700 dark:text-amber-400">
+              {warning}
             </li>
           ))}
         </ul>
@@ -300,45 +304,32 @@ function WarningsPanel({ warnings }: { warnings: string[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main export
-// ---------------------------------------------------------------------------
-
 interface BOMResultViewProps {
-  result: BOMResult;
+  result: EnrichedBOMResult;
 }
 
 export function BOMResultView({ result }: BOMResultViewProps) {
   return (
     <div className="space-y-5">
-      {/* Summary tiles */}
+      <PricingSummaryCard result={result} />
+      <LaborBreakdownCard result={result} />
       <SummaryBar result={result} />
-
-      {/* Warnings */}
+      <PhaseDecisionNotice result={result} />
       <WarningsPanel warnings={result.warnings} />
 
-      {/* Tabs */}
       <Tabs defaultValue="bom">
         <TabsList className="w-full sm:w-auto">
-          <TabsTrigger value="bom" className="flex-1 sm:flex-none">
-            BOM Items
-          </TabsTrigger>
-          <TabsTrigger value="load" className="flex-1 sm:flex-none">
-            Load Breakdown
-          </TabsTrigger>
-          <TabsTrigger value="circuits" className="flex-1 sm:flex-none">
-            Circuits
-          </TabsTrigger>
+          <TabsTrigger value="bom" className="flex-1 sm:flex-none">BOM Items</TabsTrigger>
+          <TabsTrigger value="load" className="flex-1 sm:flex-none">Load Breakdown</TabsTrigger>
+          <TabsTrigger value="circuits" className="flex-1 sm:flex-none">Circuits</TabsTrigger>
         </TabsList>
 
         <TabsContent value="bom" className="mt-4">
           <BOMItemsTab items={result.items} />
         </TabsContent>
-
         <TabsContent value="load" className="mt-4">
           <LoadBreakdownTab result={result} />
         </TabsContent>
-
         <TabsContent value="circuits" className="mt-4">
           <CircuitsTab result={result} />
         </TabsContent>
@@ -346,9 +337,8 @@ export function BOMResultView({ result }: BOMResultViewProps) {
 
       <Separator />
 
-      {/* Disclaimer */}
       <p className="text-xs text-muted-foreground">
-        {result.disclaimer} &middot; Generated by algorithm v{result.algorithmVersion} &middot;{" "}
+        {result.disclaimer} · Generated by algorithm v{result.algorithmVersion} ·{" "}
         {new Date(result.generatedAt).toLocaleString("en-IN", {
           dateStyle: "medium",
           timeStyle: "short",

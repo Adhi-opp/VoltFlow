@@ -92,12 +92,41 @@ export interface LoadBreakdown {
 // OUTPUT TYPES — The BOM result
 // ---------------------------------------------------------------------------
 
+export type PricingCode =
+  | "WIRE_1_5"
+  | "WIRE_2_5"
+  | "WIRE_4_0"
+  | "WIRE_6_0"
+  | "WIRE_10_0"
+  | "WIRE_16_0"
+  | "EARTH_WIRE_2_5"
+  | "CONDUIT_20"
+  | "CONDUIT_25"
+  | "CONDUIT_32"
+  | "MCB_10A_B"
+  | "MCB_16A_C"
+  | "MCB_20A_C"
+  | "MCB_32A_C"
+  | "MCB_63A_C"
+  | "RCCB_40A_2P_30MA"
+  | "RCCB_63A_4P_30MA"
+  | "MAIN_SWITCH_32A_DP"
+  | "MAIN_SWITCH_63A_FP"
+  | "DB_GENERIC"
+  | "SWITCH_MODULAR_6A_10A"
+  | "SOCKET_5A_2M"
+  | "SOCKET_15A_16A_3M"
+  | "FAN_REGULATOR_2M";
+
 export interface BOMWireItem {
   category: "WIRE";
+  pricingCode: PricingCode;
   wireGauge: WireGaugeKey;
   sizeSqMm: number;
   description: string;             // "1.5 sq mm FR PVC Copper Wire (Lighting)"
   totalMeters: number;             // exact meters needed (with safety margin)
+  purchasableMeters: number;       // full-coil purchase quantity
+  surplusMeters: number;           // purchasableMeters - totalMeters
   coilsRequired: number;           // rounded up to full coils
   coilLengthMeters: number;        // coil size for this gauge
   estimatedCostPerMeter?: number;  // from PriceIndex if available
@@ -106,9 +135,12 @@ export interface BOMWireItem {
 
 export interface BOMEarthWireItem {
   category: "EARTH_WIRE";
+  pricingCode: PricingCode;
   sizeSqMm: number;
   description: string;
   totalMeters: number;
+  purchasableMeters: number;
+  surplusMeters: number;
   coilsRequired: number;
   coilLengthMeters: number;
   estimatedCostPerMeter?: number;
@@ -117,6 +149,7 @@ export interface BOMEarthWireItem {
 
 export interface BOMMCBItem {
   category: "MCB";
+  pricingCode: PricingCode;
   ratingAmps: number;
   type: "B" | "C";
   quantity: number;
@@ -127,6 +160,7 @@ export interface BOMMCBItem {
 
 export interface BOMRCCBItem {
   category: "RCCB";
+  pricingCode: PricingCode;
   ratingAmps: number;
   poles: number;
   sensitivityMa: number;
@@ -138,6 +172,7 @@ export interface BOMRCCBItem {
 
 export interface BOMDistributionBoard {
   category: "DB";
+  pricingCode: PricingCode;
   ways: number;
   description: string;             // "12-Way SPN Distribution Board"
   quantity: number;
@@ -147,6 +182,7 @@ export interface BOMDistributionBoard {
 
 export interface BOMConduitItem {
   category: "CONDUIT";
+  pricingCode: PricingCode;
   sizeMm: string;                  // "20mm", "25mm", "32mm"
   totalMeters: number;
   description: string;
@@ -156,6 +192,7 @@ export interface BOMConduitItem {
 
 export interface BOMSwitchgearItem {
   category: "SWITCHGEAR";
+  pricingCode: PricingCode;
   itemType: "SWITCH" | "SOCKET_5A" | "SOCKET_15A" | "FAN_REGULATOR" | "BELL_PUSH" | "BLANK_PLATE";
   quantity: number;
   description: string;
@@ -165,6 +202,7 @@ export interface BOMSwitchgearItem {
 
 export interface BOMMainSwitch {
   category: "MAIN_SWITCH";
+  pricingCode: PricingCode;
   ratingAmps: number;
   poles: number;
   quantity: number;
@@ -198,6 +236,14 @@ export interface BOMResult {
   totalConnectedLoadKw: number;
   maxDemandKw: number;             // after diversity factors
   recommendedPhase: "SINGLE" | "THREE";
+  phaseDecision: {
+    engineeringRecommendation: "SINGLE" | "THREE";
+    regulatoryRecommendation: "SINGLE" | "THREE";
+    finalRecommendation: "SINGLE" | "THREE";
+    connectedLoadThresholdKw: number;
+    regulatoryPolicyKey: string;
+    reasons: string[];
+  };
   totalCircuits: number;
 
   // Detailed breakdown
