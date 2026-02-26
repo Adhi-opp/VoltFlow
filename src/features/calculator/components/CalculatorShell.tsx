@@ -23,9 +23,13 @@
 // ============================================================================
 
 import { useRef, useState, useTransition } from "react";
+import { Role } from "@prisma/client";
 import { AlertCircle, ChevronDown, ChevronUp, Loader2, SlidersHorizontal, X } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { createQuoteRequestAction } from "@/features/quotes/actions";
 import { PresetCards } from "./PresetCards";
 import { CalculatorForm } from "./CalculatorForm";
 import { BOMResultView } from "./BOMResultView";
@@ -38,12 +42,32 @@ import type { LayoutInput } from "../layoutTypes";
 // Component
 // ---------------------------------------------------------------------------
 
+function coerceSessionRole(role: unknown): Role | undefined {
+  switch (role) {
+    case Role.HOMEOWNER:
+    case Role.DEALER:
+    case Role.ADMIN:
+      return role;
+    default:
+      return undefined;
+  }
+}
+
 export function CalculatorShell() {
+  const { data: session, status: sessionStatus } = useSession();
+  const normalizedSessionRole = coerceSessionRole(session?.user?.role);
+
   const [result, setResult] = useState<EnrichedBOMResult | null>(null);
   const [error, setError] = useState<{
     message: string;
     code: EstimateActionErrorCode;
     missingCodes?: string[];
+  } | null>(null);
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [activeSaveMode, setActiveSaveMode] = useState<"DRAFT" | "OPEN" | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
   } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formDefaults, setFormDefaults] = useState<Partial<LayoutInput> | undefined>(undefined);
@@ -58,6 +82,7 @@ export function CalculatorShell() {
 
   function runEngine(layout: LayoutInput) {
     setError(null);
+    setSaveFeedback(null);
     startTransition(async () => {
       const res = await generateEstimateAction(layout);
       if (res.success) {
@@ -73,6 +98,37 @@ export function CalculatorShell() {
         });
       }
     });
+  }
+
+  async function handleSaveProject(status: "DRAFT" | "OPEN") {
+    if (!result || isSavingProject) return;
+
+    setSaveFeedback(null);
+    setIsSavingProject(true);
+    setActiveSaveMode(status);
+    try {
+      const saved = await createQuoteRequestAction(result, status);
+      if (saved.success) {
+        if (status === "DRAFT") {
+          toast.success("Project saved to your dashboard.");
+        } else {
+          toast.success("Quote request published to verified dealers.");
+        }
+      } else {
+        setSaveFeedback({
+          type: "error",
+          message: saved.error,
+        });
+      }
+    } catch {
+      setSaveFeedback({
+        type: "error",
+        message: "Failed to save project. Please try again.",
+      });
+    } finally {
+      setIsSavingProject(false);
+      setActiveSaveMode(null);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -229,7 +285,15 @@ export function CalculatorShell() {
                 </div>
                 {isPending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </div>
-              <BOMResultView result={result} />
+              <BOMResultView
+                result={result}
+                sessionStatus={sessionStatus}
+                sessionRole={normalizedSessionRole}
+                onSaveProject={handleSaveProject}
+                isSavingProject={isSavingProject}
+                activeSaveMode={activeSaveMode}
+                saveFeedback={saveFeedback}
+              />
             </div>
           )}
         </section>

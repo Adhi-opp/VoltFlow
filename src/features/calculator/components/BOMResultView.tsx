@@ -1,6 +1,9 @@
 "use client";
 
-import { Activity, AlertTriangle, GitBranch, LayoutGrid, Zap } from "lucide-react";
+import Link from "next/link";
+import type { Role } from "@prisma/client";
+import { Activity, AlertTriangle, GitBranch, Info, LayoutGrid, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { EnrichedBOMResult } from "../costEngine";
@@ -157,11 +160,14 @@ function PhaseDecisionNotice({ result }: { result: EnrichedBOMResult }) {
   if (!isRegulatoryOverride) return null;
 
   return (
-    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
-      3-Phase recommended: engineering demand is within safe limits ({formatKw(result.maxDemandKw)}),
-      but local DISCOM policy ({result.phaseDecision.regulatoryPolicyKey}) typically requires 3-Phase when
-      connected load exceeds {result.phaseDecision.connectedLoadThresholdKw.toFixed(1)} kW.
-      Your connected load is {formatKw(result.totalConnectedLoadKw)}.
+    <div className="flex gap-3 rounded-lg border border-blue-300 bg-blue-50 p-4 text-xs text-blue-800 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-200">
+      <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+      <p>
+        3-Phase recommended: engineering demand is within safe limits ({formatKw(result.maxDemandKw)}),
+        but local DISCOM policy ({result.phaseDecision.regulatoryPolicyKey}) typically requires 3-Phase when
+        connected load exceeds {result.phaseDecision.connectedLoadThresholdKw.toFixed(1)} kW.
+        Your connected load is {formatKw(result.totalConnectedLoadKw)}.
+      </p>
     </div>
   );
 }
@@ -304,18 +310,143 @@ function WarningsPanel({ warnings }: { warnings: string[] }) {
   );
 }
 
-interface BOMResultViewProps {
-  result: EnrichedBOMResult;
+function isPhaseRecommendationWarning(warning: string): boolean {
+  const normalized = warning.toLowerCase();
+  return (
+    normalized.startsWith("3-phase recommended:") ||
+    normalized.includes("three-phase supply recommended") ||
+    normalized.includes("single-phase supply is sufficient")
+  );
 }
 
-export function BOMResultView({ result }: BOMResultViewProps) {
+type SessionStatus = "loading" | "authenticated" | "unauthenticated";
+type SessionRole = Role | undefined;
+
+interface SaveFeedback {
+  type: "success" | "error";
+  message: string;
+}
+
+interface SaveProjectCtaProps {
+  sessionStatus: SessionStatus;
+  sessionRole: SessionRole;
+  onSaveProject: (status: "DRAFT" | "OPEN") => void;
+  isSavingProject: boolean;
+  activeSaveMode: "DRAFT" | "OPEN" | null;
+  saveFeedback: SaveFeedback | null;
+}
+
+function SaveProjectCta({
+  sessionStatus,
+  sessionRole,
+  onSaveProject,
+  isSavingProject,
+  activeSaveMode,
+  saveFeedback,
+}: SaveProjectCtaProps) {
+  const isDealer = sessionStatus === "authenticated" && sessionRole === "DEALER";
+  const canSave = sessionStatus === "authenticated" && !isDealer;
+
+  return (
+    <div className="space-y-3 rounded-lg border-2 border-primary/40 bg-primary/5 p-4">
+      <div>
+        <p className="text-sm font-semibold">Ready to request dealer quotes?</p>
+        <p className="text-xs text-muted-foreground">
+          Save this estimate to publish a quote request in the marketplace.
+        </p>
+      </div>
+
+      {sessionStatus === "loading" && (
+        <Button disabled>Checking account status...</Button>
+      )}
+
+      {sessionStatus === "unauthenticated" && (
+        <Button asChild>
+          <Link href="/login?callbackUrl=/calculator">Login to Save Project & Get Quotes</Link>
+        </Button>
+      )}
+
+      {isDealer && (
+        <div className="space-y-2">
+          <Button disabled>Save Project & Request Dealer Quotes</Button>
+          <p className="text-xs text-muted-foreground">
+            Dealer accounts cannot create quote requests.
+          </p>
+        </div>
+      )}
+
+      {canSave && (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            variant="outline"
+            onClick={() => onSaveProject("DRAFT")}
+            disabled={isSavingProject}
+            className="sm:min-w-44"
+          >
+            {isSavingProject && activeSaveMode === "DRAFT"
+              ? "Saving Project..."
+              : "Save Project"}
+          </Button>
+          <Button
+            onClick={() => onSaveProject("OPEN")}
+            disabled={isSavingProject}
+            className="sm:min-w-56"
+          >
+            {isSavingProject && activeSaveMode === "OPEN"
+              ? "Publishing Request..."
+              : "Request Dealer Quotes"}
+          </Button>
+        </div>
+      )}
+
+      {saveFeedback && (
+        <p
+          className={`rounded-md border px-3 py-2 text-sm ${
+            saveFeedback.type === "success"
+              ? "border-green-300 bg-green-50 text-green-700"
+              : "border-destructive/40 bg-destructive/10 text-destructive"
+          }`}
+        >
+          {saveFeedback.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+interface BOMResultViewProps {
+  result: EnrichedBOMResult;
+  sessionStatus: SessionStatus;
+  sessionRole: SessionRole;
+  onSaveProject: (status: "DRAFT" | "OPEN") => void;
+  isSavingProject: boolean;
+  activeSaveMode: "DRAFT" | "OPEN" | null;
+  saveFeedback: SaveFeedback | null;
+}
+
+export function BOMResultView({
+  result,
+  sessionStatus,
+  sessionRole,
+  onSaveProject,
+  isSavingProject,
+  activeSaveMode,
+  saveFeedback,
+}: BOMResultViewProps) {
+  const isRegulatoryOverride =
+    result.phaseDecision.regulatoryRecommendation === "THREE" &&
+    result.phaseDecision.engineeringRecommendation === "SINGLE";
+  const notices = isRegulatoryOverride
+    ? result.warnings.filter((warning) => !isPhaseRecommendationWarning(warning))
+    : result.warnings;
+
   return (
     <div className="space-y-5">
       <PricingSummaryCard result={result} />
       <LaborBreakdownCard result={result} />
       <SummaryBar result={result} />
       <PhaseDecisionNotice result={result} />
-      <WarningsPanel warnings={result.warnings} />
+      <WarningsPanel warnings={notices} />
 
       <Tabs defaultValue="bom">
         <TabsList className="w-full sm:w-auto">
@@ -334,6 +465,14 @@ export function BOMResultView({ result }: BOMResultViewProps) {
           <CircuitsTab result={result} />
         </TabsContent>
       </Tabs>
+      <SaveProjectCta
+        sessionStatus={sessionStatus}
+        sessionRole={sessionRole}
+        onSaveProject={onSaveProject}
+        isSavingProject={isSavingProject}
+        activeSaveMode={activeSaveMode}
+        saveFeedback={saveFeedback}
+      />
 
       <Separator />
 

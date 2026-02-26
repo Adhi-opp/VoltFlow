@@ -3,6 +3,7 @@
 import { Prisma, QuoteRequestStatus } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/auth";
+import type { EnrichedBOMResult } from "@/features/calculator/costEngine";
 import { prisma } from "@/lib/prisma";
 
 const submitQuoteSchema = z.object({
@@ -14,6 +15,7 @@ const submitQuoteSchema = z.object({
   details: z.string().trim().max(5000).optional(),
   validUntil: z.coerce.date().optional(),
 });
+const createQuoteRequestStatusSchema = z.enum(["DRAFT", "OPEN"]);
 
 export type SubmitQuoteInput = z.infer<typeof submitQuoteSchema>;
 
@@ -39,6 +41,17 @@ export type SubmitQuoteResult =
   | {
       success: false;
       errorCode: SubmitQuoteErrorCode;
+      error: string;
+    };
+
+export type CreateQuoteRequestResult =
+  | {
+      success: true;
+      quoteRequestId: string;
+    }
+  | {
+      success: false;
+      errorCode: "UNAUTHENTICATED" | "FORBIDDEN" | "INTERNAL_ERROR";
       error: string;
     };
 
@@ -84,6 +97,14 @@ function isRetryableSerializationError(error: unknown): boolean {
     return /serialize|serialization|deadlock|40001/i.test(error.message);
   }
   return false;
+}
+
+function deriveVisibilityCity(policyKey: string | undefined): string {
+  const normalized = policyKey?.trim();
+  if (!normalized || normalized.toUpperCase() === "DEFAULT") {
+    return "NCR";
+  }
+  return normalized;
 }
 
 function mapOutcomeToResult(outcome: TransactionOutcome): SubmitQuoteResult {
@@ -249,6 +270,90 @@ async function submitQuoteTransaction(
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     }
   );
+}
+
+export async function createQuoteRequestAction(
+  projectData: EnrichedBOMResult,
+  requestedStatus: "DRAFT" | "OPEN"
+): Promise<CreateQuoteRequestResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      errorCode: "UNAUTHENTICATED",
+      error: "You must be signed in to save a project.",
+    };
+  }
+
+  if (session.user.role === "DEALER") {
+    return {
+      success: false,
+      errorCode: "FORBIDDEN",
+      error: "Dealer accounts cannot create quote requests.",
+    };
+  }
+
+  const ownerId = session.user.id;
+  const parsedStatus = createQuoteRequestStatusSchema.safeParse(requestedStatus);
+  if (!parsedStatus.success) {
+    return {
+      success: false,
+      errorCode: "INTERNAL_ERROR",
+      error: "Invalid quote request status.",
+    };
+  }
+
+  const quoteRequestStatus = parsedStatus.data;
+  const visibilityCity = deriveVisibilityCity(projectData.phaseDecision?.regulatoryPolicyKey);
+  const savedAt = new Date().toISOString().replace("T", " ").slice(0, 19);
+
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const project = await tx.project.create({
+        data: {
+          ownerId,
+          projectName: `Saved Estimate ${savedAt}`,
+          projectType: "RESIDENTIAL",
+          status: quoteRequestStatus === "OPEN" ? "RFQ_SUBMITTED" : "ESTIMATED",
+          inputData: {
+            source: "CALCULATOR",
+            generatedAt: projectData.generatedAt,
+            algorithmVersion: projectData.algorithmVersion,
+          },
+          bomData: projectData as unknown as Prisma.InputJsonValue,
+          totalEstimate: projectData.pricing.totalEstimate,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const quoteRequest = await tx.quoteRequest.create({
+        data: {
+          projectId: project.id,
+          status: quoteRequestStatus,
+          visibilityCity,
+          visibilityPincode: null,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      return quoteRequest;
+    });
+
+    return {
+      success: true,
+      quoteRequestId: created.id,
+    };
+  } catch {
+    return {
+      success: false,
+      errorCode: "INTERNAL_ERROR",
+      error: "Failed to save project. Please try again.",
+    };
+  }
 }
 
 export async function submitQuoteAction(raw: SubmitQuoteInput): Promise<SubmitQuoteResult> {
