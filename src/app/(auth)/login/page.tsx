@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState, useTransition } from "react";
 import { loginUser } from "@/features/auth/actions";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export default function LoginPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const showRegisteredNotice = searchParams.get("registered") === "1";
   const callbackUrl = searchParams.get("callbackUrl") ?? undefined;
@@ -36,7 +37,9 @@ export default function LoginPage() {
       const result = await loginUser({ email, password, redirectTo: callbackUrl });
       if (!result.success) {
         setError(result.error);
+        return;
       }
+      router.refresh();
     });
   }
 

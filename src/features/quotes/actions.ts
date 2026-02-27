@@ -322,7 +322,7 @@ export async function createQuoteRequestAction(
             algorithmVersion: projectData.algorithmVersion,
           },
           bomData: JSON.parse(JSON.stringify(projectData)) as Prisma.InputJsonValue,
-          totalEstimate: projectData.pricing.totalEstimate,
+          totalEstimate: projectData.pricing.materialCost,
         },
         select: {
           id: true,
@@ -432,4 +432,175 @@ export async function submitQuoteAction(raw: SubmitQuoteInput): Promise<SubmitQu
     errorCode: "CONCURRENCY_RETRY_EXHAUSTED",
     error: "Quote submission conflicted repeatedly. Please retry in a moment.",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Accept / Reject quote actions
+// ---------------------------------------------------------------------------
+
+export type QuoteDecisionResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function acceptQuoteAction(quoteId: string): Promise<QuoteDecisionResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, error: "You must be signed in." };
+  }
+
+  for (let attempt = 0; attempt <= MAX_SERIALIZATION_RETRIES; attempt++) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // All verification inside the serializable transaction — no
+          // check-then-act gap between pre-fetch and mutation.
+          const quote = await tx.quote.findUnique({
+            where: { id: quoteId },
+            include: {
+              quoteRequest: {
+                include: {
+                  project: { select: { ownerId: true, id: true } },
+                },
+              },
+            },
+          });
+
+          if (!quote) throw new Error("QUOTE_NOT_FOUND");
+          if (quote.quoteRequest.project.ownerId !== session.user.id)
+            throw new Error("NOT_OWNER");
+          if (quote.status !== "SUBMITTED")
+            throw new Error("ALREADY_PROCESSED");
+          if (quote.quoteRequest.status !== "OPEN")
+            throw new Error("RFQ_NOT_OPEN");
+
+          // 1. Accept this quote
+          await tx.quote.update({
+            where: { id: quoteId },
+            data: { status: "ACCEPTED" },
+          });
+
+          // 2. Reject all competing quotes
+          await tx.quote.updateMany({
+            where: {
+              quoteRequestId: quote.quoteRequestId,
+              id: { not: quoteId },
+              status: "SUBMITTED",
+            },
+            data: { status: "REJECTED" },
+          });
+
+          // 3. Close the QuoteRequest
+          await tx.quoteRequest.update({
+            where: { id: quote.quoteRequestId },
+            data: { status: "CLOSED" },
+          });
+
+          // 4. Lock the Project
+          await tx.project.update({
+            where: { id: quote.quoteRequest.project.id },
+            data: { status: "CLOSED" },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+
+      return { success: true };
+    } catch (err) {
+      // Business logic errors — return immediately, don't retry
+      if (err instanceof Error) {
+        switch (err.message) {
+          case "QUOTE_NOT_FOUND":
+            return { success: false, error: "Quote not found." };
+          case "NOT_OWNER":
+            return { success: false, error: "You do not own this project." };
+          case "ALREADY_PROCESSED":
+            return { success: false, error: "This quote has already been processed." };
+          case "RFQ_NOT_OPEN":
+            return { success: false, error: "This quote request is no longer open." };
+        }
+      }
+
+      // Serialization conflicts — retry with jittered backoff
+      if (isRetryableSerializationError(err) && attempt < MAX_SERIALIZATION_RETRIES) {
+        const delay = RETRY_WINDOWS_MS[attempt];
+        await sleep(randomIntInclusive(delay.min, delay.max));
+        continue;
+      }
+
+      logger.error("Failed to accept quote", {
+        error: err instanceof Error ? err.message : "Unknown",
+        quoteId,
+        attempt,
+      });
+      return { success: false, error: "Failed to accept quote. Please try again." };
+    }
+  }
+
+  return { success: false, error: "Failed to accept quote after retries. Please try again." };
+}
+
+export async function rejectQuoteAction(quoteId: string): Promise<QuoteDecisionResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, error: "You must be signed in." };
+  }
+
+  for (let attempt = 0; attempt <= MAX_SERIALIZATION_RETRIES; attempt++) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          const quote = await tx.quote.findUnique({
+            where: { id: quoteId },
+            include: {
+              quoteRequest: {
+                include: {
+                  project: { select: { ownerId: true } },
+                },
+              },
+            },
+          });
+
+          if (!quote) throw new Error("QUOTE_NOT_FOUND");
+          if (quote.quoteRequest.project.ownerId !== session.user.id)
+            throw new Error("NOT_OWNER");
+          if (quote.status !== "SUBMITTED")
+            throw new Error("ALREADY_PROCESSED");
+
+          await tx.quote.update({
+            where: { id: quoteId },
+            data: { status: "REJECTED" },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+
+      return { success: true };
+    } catch (err) {
+      if (err instanceof Error) {
+        switch (err.message) {
+          case "QUOTE_NOT_FOUND":
+            return { success: false, error: "Quote not found." };
+          case "NOT_OWNER":
+            return { success: false, error: "You do not own this project." };
+          case "ALREADY_PROCESSED":
+            return { success: false, error: "This quote has already been processed." };
+        }
+      }
+
+      if (isRetryableSerializationError(err) && attempt < MAX_SERIALIZATION_RETRIES) {
+        const delay = RETRY_WINDOWS_MS[attempt];
+        await sleep(randomIntInclusive(delay.min, delay.max));
+        continue;
+      }
+
+      logger.error("Failed to reject quote", {
+        error: err instanceof Error ? err.message : "Unknown",
+        quoteId,
+        attempt,
+      });
+      return { success: false, error: "Failed to reject quote. Please try again." };
+    }
+  }
+
+  return { success: false, error: "Failed to reject quote after retries. Please try again." };
 }
