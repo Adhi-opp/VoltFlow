@@ -24,14 +24,35 @@ const registerSchema = z
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  redirectTo: z.string().trim().min(1).optional(),
 });
 
 export type RegisterUserInput = z.infer<typeof registerSchema>;
 export type LoginUserInput = z.infer<typeof loginSchema>;
+const DEFAULT_LOGIN_REDIRECT = "/calculator";
 
 function formatZodIssues(issues: z.ZodIssue[]): string {
   const cleanMessages = issues.map((issue) => issue.message).filter(Boolean);
   return cleanMessages.join("; ");
+}
+
+function resolveSafeRedirectTo(redirectTo: string | undefined): string {
+  if (!redirectTo) {
+    return DEFAULT_LOGIN_REDIRECT;
+  }
+
+  const trimmed = redirectTo.trim();
+  if (!trimmed.startsWith("/")) {
+    return DEFAULT_LOGIN_REDIRECT;
+  }
+  if (trimmed.startsWith("//")) {
+    return DEFAULT_LOGIN_REDIRECT;
+  }
+  if (trimmed.includes("://")) {
+    return DEFAULT_LOGIN_REDIRECT;
+  }
+
+  return trimmed;
 }
 
 export type RegisterUserResult =
@@ -129,10 +150,11 @@ export async function loginUser(data: LoginUserInput): Promise<LoginUserResult> 
   }
 
   try {
+    const redirectTo = resolveSafeRedirectTo(parsed.data.redirectTo);
     await signIn("credentials", {
       email: parsed.data.email.trim().toLowerCase(),
       password: parsed.data.password,
-      redirectTo: "/calculator",
+      redirectTo,
     });
     return { success: true };
   } catch (error) {

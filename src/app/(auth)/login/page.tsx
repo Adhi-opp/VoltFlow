@@ -19,6 +19,10 @@ import { Label } from "@/components/ui/label";
 export default function LoginPage() {
   const searchParams = useSearchParams();
   const showRegisteredNotice = searchParams.get("registered") === "1";
+  const callbackUrl = searchParams.get("callbackUrl") ?? undefined;
+  const registerHref = callbackUrl
+    ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}`
+    : "/register";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +33,7 @@ export default function LoginPage() {
     setError(null);
 
     startTransition(async () => {
-      const result = await loginUser({ email, password });
+      const result = await loginUser({ email, password, redirectTo: callbackUrl });
       if (!result.success) {
         setError(result.error);
       }
@@ -85,7 +89,7 @@ export default function LoginPage() {
         <CardFooter>
           <p className="text-sm text-muted-foreground">
             New here?{" "}
-            <Link className="font-medium text-foreground hover:underline" href="/register">
+            <Link className="font-medium text-foreground hover:underline" href={registerHref}>
               Create an account
             </Link>
           </p>

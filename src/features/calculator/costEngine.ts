@@ -177,14 +177,19 @@ function computeLabor(inputs: LaborInputs): { laborCost: number; laborBreakdown:
   };
 }
 
-export function applyPricing(result: BOMResult): EnrichedBOMResult {
+export type RateCard = Record<PricingCode, RateCardEntry>;
+
+export function applyPricing(
+  result: BOMResult,
+  rateCard: RateCard = RATE_CARD
+): EnrichedBOMResult {
   let materialCost = 0;
   let surplusMetersTotal = 0;
   let surplusValueTotal = 0;
   const missingCodes = new Set<PricingCode>();
 
   for (const item of result.items) {
-    const priceConfig = RATE_CARD[item.pricingCode];
+    const priceConfig = rateCard[item.pricingCode];
 
     if (!priceConfig || priceConfig.rate <= 0) {
       missingCodes.add(item.pricingCode);

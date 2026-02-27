@@ -15,14 +15,22 @@ const NCR_CITY_KEYS = new Set<string>([
   "FARIDABAD",
 ]);
 
-function normalizeCityKey(city: string): string {
+export function normalizeCityKey(city: string): string {
   return city.replace(/\s+/g, " ").trim().toUpperCase();
 }
 
-export function resolveRegulatoryPhasePolicy(input: CalculatorInput): {
+export interface RegulatoryPolicyResult {
   cityKey: string;
   connectedLoadThresholdKw: number;
-} {
+}
+
+/**
+ * Pure/synchronous fallback — uses hardcoded NCR thresholds.
+ * Called by calculateBOM (which must stay pure/sync).
+ */
+export function resolveRegulatoryPhasePolicy(
+  input: CalculatorInput
+): RegulatoryPolicyResult {
   const cityKey = normalizeCityKey(input.city || "NCR");
 
   if (NCR_CITY_KEYS.has(cityKey)) {
@@ -37,3 +45,8 @@ export function resolveRegulatoryPhasePolicy(input: CalculatorInput): {
     connectedLoadThresholdKw: DEFAULT_CONNECTED_LOAD_THRESHOLD_KW,
   };
 }
+
+/** Hardcoded fallback constants — exported for use by the DB loader */
+export const FALLBACK_NCR_THRESHOLD_KW = NCR_CONNECTED_LOAD_THRESHOLD_KW;
+export const FALLBACK_DEFAULT_THRESHOLD_KW = DEFAULT_CONNECTED_LOAD_THRESHOLD_KW;
+export const FALLBACK_NCR_CITY_KEYS = NCR_CITY_KEYS;

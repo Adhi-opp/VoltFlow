@@ -8,6 +8,7 @@
 // ============================================================================
 
 import type { Metadata } from "next";
+import { CalculatorErrorBoundary } from "@/features/calculator/components/CalculatorErrorBoundary";
 import { CalculatorShell } from "@/features/calculator/components/CalculatorShell";
 
 export const metadata: Metadata = {
@@ -29,7 +30,9 @@ export default function CalculatorPage() {
       </div>
 
       {/* Client shell — owns all state and engine calls */}
-      <CalculatorShell />
+      <CalculatorErrorBoundary>
+        <CalculatorShell />
+      </CalculatorErrorBoundary>
     </main>
   );
 }

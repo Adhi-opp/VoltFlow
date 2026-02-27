@@ -212,6 +212,34 @@ run("rate <= 0 is treated as missing pricing data", () => {
   }
 });
 
+run("applyPricing accepts custom rate card override", () => {
+  const items: BOMItem[] = [
+    {
+      category: "WIRE",
+      pricingCode: "WIRE_1_5",
+      wireGauge: "1.5",
+      sizeSqMm: 1.5,
+      description: "1.5 wire",
+      totalMeters: 100,
+      purchasableMeters: 180,
+      surplusMeters: 80,
+      coilsRequired: 2,
+      coilLengthMeters: 90,
+    },
+  ];
+
+  // Custom rate card with doubled wire price
+  const customRateCard = { ...RATE_CARD };
+  customRateCard.WIRE_1_5 = { rate: 36, basis: "per_meter" as const, source: "FINAL" as const };
+
+  const pricedDefault = applyPricing(makeResult(items));
+  const pricedCustom = applyPricing(makeResult(items), customRateCard);
+
+  // Default: 100m × 18 = 1800, Custom: 100m × 36 = 3600
+  assert.equal(pricedDefault.pricing.materialCost, 100 * 18);
+  assert.equal(pricedCustom.pricing.materialCost, 100 * 36);
+});
+
 run("deterministic totals are additive", () => {
   const items: BOMItem[] = [
     {

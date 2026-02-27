@@ -20,8 +20,12 @@ export default function RegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const roleParam = searchParams.get("role");
+  const callbackUrl = searchParams.get("callbackUrl");
   const role = roleParam === "DEALER" ? "DEALER" : "HOMEOWNER";
   const accountLabel = role === "DEALER" ? "Dealer" : "Homeowner";
+  const loginHref = callbackUrl
+    ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`
+    : "/login";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,7 +51,11 @@ export default function RegisterPage() {
         return;
       }
 
-      router.push("/login?registered=1");
+      const params = new URLSearchParams({ registered: "1" });
+      if (callbackUrl) {
+        params.set("callbackUrl", callbackUrl);
+      }
+      router.push(`/login?${params.toString()}`);
     });
   }
 
@@ -123,7 +131,7 @@ export default function RegisterPage() {
         <CardFooter>
           <p className="text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link className="font-medium text-foreground hover:underline" href="/login">
+            <Link className="font-medium text-foreground hover:underline" href={loginHref}>
               Sign in
             </Link>
           </p>

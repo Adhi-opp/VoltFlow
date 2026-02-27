@@ -1,8 +1,10 @@
 "use server";
 
+import { logger } from "@/lib/logger";
 import { calculateBOM } from "./calculateBOM";
 import { applyPricing, PricingDataError } from "./costEngine";
 import { buildCalculatorInput } from "./generateRoomSpecs";
+import { loadRateCardFromDb, loadRegulatoryPolicyFromDb } from "./loadRatesFromDb";
 import { layoutSchema } from "./schemas";
 import type { EnrichedBOMResult } from "./costEngine";
 import type { LayoutFormValues } from "./schemas";
@@ -40,11 +42,16 @@ export async function generateEstimateAction(
 
   try {
     const calculatorInput = buildCalculatorInput(parsed.data);
-    const bom = calculateBOM(calculatorInput);
-    const enriched = applyPricing(bom);
+    const [regulatoryPolicy, rateCard] = await Promise.all([
+      loadRegulatoryPolicyFromDb(calculatorInput.city),
+      loadRateCardFromDb(),
+    ]);
+    const bom = calculateBOM(calculatorInput, regulatoryPolicy);
+    const enriched = applyPricing(bom, rateCard);
     return { success: true, data: enriched };
   } catch (err) {
     if (err instanceof PricingDataError) {
+      logger.warn("Pricing data missing for estimate", { missingCodes: err.missingCodes });
       return {
         success: false,
         error:
@@ -55,6 +62,7 @@ export async function generateEstimateAction(
     }
 
     const message = err instanceof Error ? err.message : "Unexpected calculation error";
+    logger.error("Estimate generation failed", { error: message });
     return {
       success: false,
       error: message,

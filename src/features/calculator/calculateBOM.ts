@@ -27,7 +27,10 @@ import {
   VOLTAGE_DROP,
   type WireGaugeKey,
 } from "./constants";
-import { resolveRegulatoryPhasePolicy } from "./regulatoryPolicy";
+import {
+  resolveRegulatoryPhasePolicy,
+  type RegulatoryPolicyResult,
+} from "./regulatoryPolicy";
 
 import type {
   CalculatorInput,
@@ -523,7 +526,10 @@ function checkVoltageDropOk(
 // MAIN CALCULATION FUNCTION
 // ============================================================================
 
-export function calculateBOM(input: CalculatorInput): BOMResult {
+export function calculateBOM(
+  input: CalculatorInput,
+  regulatoryOverride?: RegulatoryPolicyResult
+): BOMResult {
   const warnings: string[] = [];
 
   // --- Step 1: Generate circuits (grouped per floor) ---
@@ -566,7 +572,7 @@ export function calculateBOM(input: CalculatorInput): BOMResult {
   // --- Step 4: Recommend phase (engineering + regulatory) ---
   const engineeringRecommendation: "SINGLE" | "THREE" =
     maxDemandKw > ENGINEERING_THREE_PHASE_THRESHOLD_KW ? "THREE" : "SINGLE";
-  const regulatoryPolicy = resolveRegulatoryPhasePolicy(input);
+  const regulatoryPolicy = regulatoryOverride ?? resolveRegulatoryPhasePolicy(input);
   const regulatoryRecommendation: "SINGLE" | "THREE" =
     totalConnectedLoadKw > regulatoryPolicy.connectedLoadThresholdKw ? "THREE" : "SINGLE";
   const recommendedPhase: "SINGLE" | "THREE" =

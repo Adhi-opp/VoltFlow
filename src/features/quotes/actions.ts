@@ -5,6 +5,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import type { EnrichedBOMResult } from "@/features/calculator/costEngine";
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 
 const submitQuoteSchema = z.object({
   quoteRequestId: z.string().min(1),
@@ -320,7 +321,7 @@ export async function createQuoteRequestAction(
             generatedAt: projectData.generatedAt,
             algorithmVersion: projectData.algorithmVersion,
           },
-          bomData: projectData as unknown as Prisma.InputJsonValue,
+          bomData: JSON.parse(JSON.stringify(projectData)) as Prisma.InputJsonValue,
           totalEstimate: projectData.pricing.totalEstimate,
         },
         select: {
@@ -347,7 +348,11 @@ export async function createQuoteRequestAction(
       success: true,
       quoteRequestId: created.id,
     };
-  } catch {
+  } catch (err) {
+    logger.error("Failed to create quote request", {
+      error: err instanceof Error ? err.message : "Unknown error",
+      ownerId,
+    });
     return {
       success: false,
       errorCode: "INTERNAL_ERROR",
@@ -394,7 +399,13 @@ export async function submitQuoteAction(raw: SubmitQuoteInput): Promise<SubmitQu
       return mapOutcomeToResult(outcome);
     } catch (error) {
       if (isRetryableSerializationError(error)) {
+        logger.warn("Quote submission serialization conflict", {
+          retry,
+          dealerId,
+          quoteRequestId: parsed.data.quoteRequestId,
+        });
         if (retry === MAX_SERIALIZATION_RETRIES) {
+          logger.error("Quote submission retries exhausted", { dealerId });
           return {
             success: false,
             errorCode: "CONCURRENCY_RETRY_EXHAUSTED",

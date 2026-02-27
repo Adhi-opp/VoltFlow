@@ -350,9 +350,9 @@ function SaveProjectCta({
   return (
     <div className="space-y-3 rounded-lg border-2 border-primary/40 bg-primary/5 p-4">
       <div>
-        <p className="text-sm font-semibold">Ready to request dealer quotes?</p>
+        <p className="text-sm font-semibold">Save your estimate</p>
         <p className="text-xs text-muted-foreground">
-          Save this estimate to publish a quote request in the marketplace.
+          Save this estimate to your dashboard, or publish it to get dealer quotes.
         </p>
       </div>
 
@@ -361,9 +361,14 @@ function SaveProjectCta({
       )}
 
       {sessionStatus === "unauthenticated" && (
-        <Button asChild>
-          <Link href="/login?callbackUrl=/calculator">Login to Save Project & Get Quotes</Link>
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" asChild className="sm:min-w-44">
+            <Link href="/login?callbackUrl=/calculator">Save Project</Link>
+          </Button>
+          <Button asChild className="sm:min-w-56">
+            <Link href="/login?callbackUrl=/calculator">Save Project & Request Quotes</Link>
+          </Button>
+        </div>
       )}
 
       {isDealer && (
@@ -394,7 +399,7 @@ function SaveProjectCta({
           >
             {isSavingProject && activeSaveMode === "OPEN"
               ? "Publishing Request..."
-              : "Request Dealer Quotes"}
+              : "Save Project & Request Quotes"}
           </Button>
         </div>
       )}
