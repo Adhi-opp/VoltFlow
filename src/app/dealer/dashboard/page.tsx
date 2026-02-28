@@ -113,7 +113,11 @@ export default async function DealerDashboardPage() {
       quoteRequest: {
         include: {
           project: {
-            select: { projectName: true, totalEstimate: true },
+            select: {
+              projectName: true,
+              totalEstimate: true,
+              owner: { select: { name: true, email: true, phone: true } },
+            },
           },
         },
       },
@@ -258,6 +262,18 @@ export default async function DealerDashboardPage() {
                     </Badge>
                   </div>
                 </CardContent>
+                {quote.status === "ACCEPTED" && (
+                  <CardFooter className="flex-col items-start gap-1 border-t pt-3 text-sm">
+                    <p className="font-medium text-green-700">
+                      Homeowner Contact
+                    </p>
+                    <p>{quote.quoteRequest.project.owner.name}</p>
+                    <p>{quote.quoteRequest.project.owner.email}</p>
+                    {quote.quoteRequest.project.owner.phone && (
+                      <p>{quote.quoteRequest.project.owner.phone}</p>
+                    )}
+                  </CardFooter>
+                )}
               </Card>
             ))}
           </div>

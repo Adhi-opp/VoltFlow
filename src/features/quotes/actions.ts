@@ -6,6 +6,12 @@ import { auth } from "@/auth";
 import type { EnrichedBOMResult } from "@/features/calculator/costEngine";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import {
+  sendNewRfqNotification,
+  sendQuoteReceivedNotification,
+  sendQuoteAcceptedNotification,
+  sendQuoteRejectedNotification,
+} from "@/lib/email";
 
 const submitQuoteSchema = z.object({
   quoteRequestId: z.string().min(1),
@@ -344,6 +350,34 @@ export async function createQuoteRequestAction(
       return quoteRequest;
     });
 
+    // Fire-and-forget: notify matching dealers
+    if (quoteRequestStatus === "OPEN") {
+      prisma.dealerProfile
+        .findMany({
+          where: {
+            approvalStatus: "APPROVED",
+            OR: [
+              { city: { equals: visibilityCity, mode: "insensitive" } },
+              { serviceAreas: { has: visibilityCity } },
+            ],
+          },
+          include: { user: { select: { email: true, name: true } } },
+        })
+        .then((dealers) => {
+          for (const d of dealers) {
+            sendNewRfqNotification(d.user.email, {
+              dealerName: d.user.name ?? d.companyName,
+              projectName: `Saved Estimate ${savedAt}`,
+              estimateValue: projectData.pricing.materialCost,
+              rfqCity: visibilityCity,
+            }).catch((e) =>
+              logger.error("Email: new RFQ notification failed", { error: String(e), dealer: d.user.email })
+            );
+          }
+        })
+        .catch((e) => logger.error("Email: dealer lookup failed", { error: String(e) }));
+    }
+
     return {
       success: true,
       quoteRequestId: created.id,
@@ -396,7 +430,38 @@ export async function submitQuoteAction(raw: SubmitQuoteInput): Promise<SubmitQu
   for (let retry = 0; retry <= MAX_SERIALIZATION_RETRIES; retry += 1) {
     try {
       const outcome = await submitQuoteTransaction(parsed.data, dealerId);
-      return mapOutcomeToResult(outcome);
+      const result = mapOutcomeToResult(outcome);
+
+      // Fire-and-forget: notify homeowner of new quote
+      if (result.success && !result.idempotent) {
+        prisma.quoteRequest
+          .findUnique({
+            where: { id: parsed.data.quoteRequestId },
+            include: {
+              project: { include: { owner: { select: { email: true, name: true } } } },
+            },
+          })
+          .then((qr) => {
+            if (!qr) return;
+            const dealerProfile = prisma.dealerProfile.findUnique({
+              where: { userId: dealerId },
+              select: { companyName: true },
+            });
+            return dealerProfile.then((dp) => {
+              sendQuoteReceivedNotification(qr.project.owner.email, {
+                homeownerName: qr.project.owner.name ?? "Homeowner",
+                projectName: qr.project.projectName,
+                dealerCompany: dp?.companyName ?? "A dealer",
+                quotePrice: parsed.data.totalPrice,
+              }).catch((e) =>
+                logger.error("Email: quote received notification failed", { error: String(e) })
+              );
+            });
+          })
+          .catch((e) => logger.error("Email: owner lookup failed", { error: String(e) }));
+      }
+
+      return result;
     } catch (error) {
       if (isRetryableSerializationError(error)) {
         logger.warn("Quote submission serialization conflict", {
@@ -504,6 +569,41 @@ export async function acceptQuoteAction(quoteId: string): Promise<QuoteDecisionR
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
+      // Fire-and-forget: email notifications after acceptance
+      prisma.quote
+        .findUnique({
+          where: { id: quoteId },
+          include: {
+            dealer: { select: { email: true, name: true, dealerProfile: { select: { companyName: true } } } },
+            quoteRequest: {
+              include: {
+                project: { include: { owner: { select: { name: true, email: true, phone: true } } } },
+                quotes: { where: { id: { not: quoteId }, status: "REJECTED" }, include: { dealer: { select: { email: true, name: true } } } },
+              },
+            },
+          },
+        })
+        .then((q) => {
+          if (!q) return;
+          const owner = q.quoteRequest.project.owner;
+          // Notify winning dealer with homeowner contact
+          sendQuoteAcceptedNotification(q.dealer.email, {
+            dealerName: q.dealer.name ?? q.dealer.dealerProfile?.companyName ?? "Dealer",
+            projectName: q.quoteRequest.project.projectName,
+            homeownerName: owner.name ?? "Homeowner",
+            homeownerEmail: owner.email,
+            homeownerPhone: owner.phone,
+          }).catch((e) => logger.error("Email: accept notification failed", { error: String(e) }));
+          // Notify rejected dealers
+          for (const rq of q.quoteRequest.quotes) {
+            sendQuoteRejectedNotification(rq.dealer.email, {
+              dealerName: rq.dealer.name ?? "Dealer",
+              projectName: q.quoteRequest.project.projectName,
+            }).catch((e) => logger.error("Email: reject notification failed", { error: String(e) }));
+          }
+        })
+        .catch((e) => logger.error("Email: post-accept lookup failed", { error: String(e) }));
+
       return { success: true };
     } catch (err) {
       // Business logic errors — return immediately, don't retry
@@ -573,6 +673,24 @@ export async function rejectQuoteAction(quoteId: string): Promise<QuoteDecisionR
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+
+      // Fire-and-forget: notify rejected dealer
+      prisma.quote
+        .findUnique({
+          where: { id: quoteId },
+          include: {
+            dealer: { select: { email: true, name: true } },
+            quoteRequest: { include: { project: { select: { projectName: true } } } },
+          },
+        })
+        .then((q) => {
+          if (!q) return;
+          sendQuoteRejectedNotification(q.dealer.email, {
+            dealerName: q.dealer.name ?? "Dealer",
+            projectName: q.quoteRequest.project.projectName,
+          }).catch((e) => logger.error("Email: reject notification failed", { error: String(e) }));
+        })
+        .catch((e) => logger.error("Email: post-reject lookup failed", { error: String(e) }));
 
       return { success: true };
     } catch (err) {

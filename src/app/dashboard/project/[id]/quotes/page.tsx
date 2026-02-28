@@ -32,6 +32,7 @@ export default async function QuotesPage({ params }: PageProps) {
                 select: {
                   name: true,
                   email: true,
+                  phone: true,
                   dealerProfile: {
                     select: {
                       companyName: true,
@@ -70,6 +71,8 @@ export default async function QuotesPage({ params }: PageProps) {
       dealerName:
         q.dealer.dealerProfile?.companyName ?? q.dealer.name ?? "Dealer",
       dealerCity: q.dealer.dealerProfile?.city ?? "",
+      dealerEmail: q.status === "ACCEPTED" ? q.dealer.email : null,
+      dealerPhone: q.status === "ACCEPTED" ? (q.dealer.phone ?? null) : null,
     })) ?? [];
 
   return (

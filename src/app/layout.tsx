@@ -17,9 +17,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WireMart — Electrical BOM Calculator",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL || "https://wiremart.in"
+  ),
+  title: {
+    default: "WireMart — Electrical BOM Calculator & Marketplace",
+    template: "%s | WireMart",
+  },
   description:
-    "Estimate wiring costs for your home. IS 732:2019 compliant Bill of Materials with dealer quotes.",
+    "India's electrical wiring marketplace. IS 732:2019 compliant BOM calculator with competitive dealer quotes.",
+  openGraph: {
+    siteName: "WireMart",
+    type: "website",
+    locale: "en_IN",
+  },
 };
 
 export default async function RootLayout({

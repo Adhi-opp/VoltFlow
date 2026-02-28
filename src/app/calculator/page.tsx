@@ -12,9 +12,22 @@ import { CalculatorErrorBoundary } from "@/features/calculator/components/Calcul
 import { CalculatorShell } from "@/features/calculator/components/CalculatorShell";
 
 export const metadata: Metadata = {
-  title: "Electrical BOM Calculator — WireMart",
+  title: "Free Electrical Wiring Calculator | IS 732 BOM Estimate",
   description:
-    "Get an IS 732:2019 compliant Bill of Materials for your NCR home — wires, MCBs, conduit, and more. Instant estimate, no sign-up required.",
+    "Calculate your home electrical wiring costs instantly. IS 732:2019 compliant Bill of Materials — wires, MCBs, conduit, and more. Get dealer quotes in NCR.",
+  keywords: [
+    "electrical wiring calculator",
+    "BOM calculator India",
+    "IS 732",
+    "home wiring cost",
+    "electrical estimate",
+    "wire gauge calculator",
+  ],
+  openGraph: {
+    title: "Free Electrical Wiring Calculator — WireMart",
+    description:
+      "IS 732:2019 compliant Bill of Materials. Instant estimates for NCR homes.",
+  },
 };
 
 export default function CalculatorPage() {

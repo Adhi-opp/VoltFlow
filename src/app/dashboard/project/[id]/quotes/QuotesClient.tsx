@@ -30,6 +30,8 @@ interface QuoteData {
   createdAt: string;
   dealerName: string;
   dealerCity: string;
+  dealerEmail: string | null;
+  dealerPhone: string | null;
 }
 
 interface Props {
@@ -204,6 +206,20 @@ export function QuotesClient({ quotes: initialQuotes, rfqStatus }: Props) {
                   </div>
                 )}
               </CardContent>
+
+              {quote.status === "ACCEPTED" && (quote.dealerEmail || quote.dealerPhone) && (
+                <div className="mx-6 mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm">
+                  <p className="mb-1 font-medium text-green-800">
+                    Dealer Contact Info
+                  </p>
+                  {quote.dealerEmail && (
+                    <p className="text-green-700">Email: {quote.dealerEmail}</p>
+                  )}
+                  {quote.dealerPhone && (
+                    <p className="text-green-700">Phone: {quote.dealerPhone}</p>
+                  )}
+                </div>
+              )}
 
               {isSubmitted && !hasAccepted && (
                 <CardFooter className="gap-2">
