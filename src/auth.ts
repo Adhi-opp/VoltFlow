@@ -4,6 +4,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { authConfig } from "@/auth.config";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -11,11 +12,9 @@ const credentialsSchema = z.object({
 });
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   session: {
     strategy: "jwt",
-  },
-  pages: {
-    signIn: "/login",
   },
   providers: [
     Credentials({
