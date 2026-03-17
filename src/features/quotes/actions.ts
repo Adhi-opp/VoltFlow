@@ -224,10 +224,10 @@ async function submitQuoteTransaction(
 
       const dealerProfile = await tx.dealerProfile.findUnique({
         where: { userId: dealerId },
-        select: { id: true },
+        select: { id: true, approvalStatus: true },
       });
 
-      if (!dealerProfile) {
+      if (!dealerProfile || dealerProfile.approvalStatus !== "APPROVED") {
         return { kind: "DEALER_PROFILE_MISSING" } as const;
       }
 

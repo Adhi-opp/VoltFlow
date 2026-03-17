@@ -3,6 +3,10 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import {
+  sendDealerApprovedNotification,
+  sendDealerRejectedNotification,
+} from "@/lib/email";
 
 async function requireAdmin() {
   const session = await auth();
@@ -21,10 +25,22 @@ export async function approveDealerAction(
 ): Promise<AdminActionResult> {
   try {
     await requireAdmin();
-    await prisma.dealerProfile.update({
+    const profile = await prisma.dealerProfile.update({
       where: { id: dealerProfileId },
       data: { approvalStatus: "APPROVED" },
+      include: { user: { select: { email: true, name: true } } },
     });
+
+    sendDealerApprovedNotification(profile.user.email, {
+      dealerName: profile.user.name ?? "Dealer",
+      companyName: profile.companyName,
+    }).catch((e) =>
+      logger.error("Email: dealer approved notification failed", {
+        error: e instanceof Error ? e.message : "Unknown",
+        dealerProfileId,
+      })
+    );
+
     return { success: true };
   } catch (err) {
     if (err instanceof Error && err.message === "FORBIDDEN") {
@@ -43,10 +59,22 @@ export async function rejectDealerAction(
 ): Promise<AdminActionResult> {
   try {
     await requireAdmin();
-    await prisma.dealerProfile.update({
+    const profile = await prisma.dealerProfile.update({
       where: { id: dealerProfileId },
       data: { approvalStatus: "REJECTED" },
+      include: { user: { select: { email: true, name: true } } },
     });
+
+    sendDealerRejectedNotification(profile.user.email, {
+      dealerName: profile.user.name ?? "Dealer",
+      companyName: profile.companyName,
+    }).catch((e) =>
+      logger.error("Email: dealer rejected notification failed", {
+        error: e instanceof Error ? e.message : "Unknown",
+        dealerProfileId,
+      })
+    );
+
     return { success: true };
   } catch (err) {
     if (err instanceof Error && err.message === "FORBIDDEN") {

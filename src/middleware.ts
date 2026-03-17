@@ -8,33 +8,37 @@ export default auth((req) => {
   const session = req.auth;
   const { pathname } = req.nextUrl;
   const isLoggedIn = !!session?.user;
+  const role = session?.user?.role;
+
+  // NOTE: /login and /register must NOT be in the matcher below,
+  // otherwise unauthenticated redirects would loop infinitely.
 
   // /admin/* → ADMIN role only
   if (pathname.startsWith("/admin")) {
-    if (!isLoggedIn) {
+    if (!isLoggedIn || !role) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
-    if (session.user.role !== "ADMIN") {
+    if (role !== "ADMIN") {
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
   }
 
   // /dealer/* → DEALER or ADMIN only
   if (pathname.startsWith("/dealer")) {
-    if (!isLoggedIn) {
+    if (!isLoggedIn || !role) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
-    if (session.user.role !== "DEALER" && session.user.role !== "ADMIN") {
+    if (role !== "DEALER" && role !== "ADMIN") {
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
   }
 
   // /dashboard/* → any logged-in user; DEALER redirected to dealer dashboard
   if (pathname.startsWith("/dashboard")) {
-    if (!isLoggedIn) {
+    if (!isLoggedIn || !role) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
-    if (session.user.role === "DEALER") {
+    if (role === "DEALER") {
       return NextResponse.redirect(new URL("/dealer/dashboard", req.url));
     }
   }
