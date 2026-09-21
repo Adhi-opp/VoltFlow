@@ -3,7 +3,7 @@
 import { Prisma, QuoteRequestStatus } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/auth";
-import type { EnrichedBOMResult } from "@/features/calculator/costEngine";
+import { runEstimate } from "@/features/calculator/runEstimate";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import {
@@ -11,6 +11,7 @@ import {
   sendQuoteReceivedNotification,
   sendQuoteAcceptedNotification,
   sendQuoteRejectedNotification,
+  sendAdminProjectSavedNotification,
 } from "@/lib/email";
 
 const submitQuoteSchema = z.object({
@@ -58,7 +59,12 @@ export type CreateQuoteRequestResult =
     }
   | {
       success: false;
-      errorCode: "UNAUTHENTICATED" | "FORBIDDEN" | "INTERNAL_ERROR";
+      errorCode:
+        | "UNAUTHENTICATED"
+        | "FORBIDDEN"
+        | "VALIDATION_ERROR"
+        | "PRICING_DATA_MISSING"
+        | "INTERNAL_ERROR";
       error: string;
     };
 
@@ -279,8 +285,18 @@ async function submitQuoteTransaction(
   );
 }
 
+/**
+ * Persists a calculator estimate as a Project (+ QuoteRequest).
+ *
+ * Takes the *layout*, not a finished BOM. The calculator is public, so a
+ * client-supplied BOM and price cannot be trusted — the estimate is
+ * recomputed here from validated inputs at current rates, and only that
+ * server-derived result is ever written to the database or emailed to
+ * dealers. This also means a saved project always reflects live pricing,
+ * not whatever the browser tab was holding.
+ */
 export async function createQuoteRequestAction(
-  projectData: EnrichedBOMResult,
+  layout: unknown,
   requestedStatus: "DRAFT" | "OPEN"
 ): Promise<CreateQuoteRequestResult> {
   const session = await auth();
@@ -310,22 +326,52 @@ export async function createQuoteRequestAction(
     };
   }
 
+  // Recompute from the layout — never trust a price that came from the client.
+  const estimate = await runEstimate(layout);
+  if (!estimate.ok) {
+    logger.warn("Project save rejected by estimate pipeline", {
+      ownerId,
+      errorCode: estimate.errorCode,
+    });
+    return {
+      success: false,
+      errorCode:
+        estimate.errorCode === "PRICING_DATA_MISSING"
+          ? "PRICING_DATA_MISSING"
+          : estimate.errorCode === "VALIDATION_ERROR"
+          ? "VALIDATION_ERROR"
+          : "INTERNAL_ERROR",
+      error: estimate.error,
+    };
+  }
+
+  const projectData = estimate.result;
+  const layoutData = estimate.layout;
+
   const quoteRequestStatus = parsedStatus.data;
   const visibilityCity = deriveVisibilityCity(projectData.phaseDecision?.regulatoryPolicyKey);
-  const savedAt = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const now = new Date();
+  const savedAt = now.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 
   try {
     const created = await prisma.$transaction(async (tx) => {
       const project = await tx.project.create({
         data: {
           ownerId,
-          projectName: `Saved Estimate ${savedAt}`,
+          projectName: `Estimate — ${savedAt}`,
           projectType: "RESIDENTIAL",
           status: quoteRequestStatus === "OPEN" ? "RFQ_SUBMITTED" : "ESTIMATED",
+          // Persist the validated layout, not just provenance — this is what
+          // lets a project be re-estimated later at updated rates.
           inputData: {
             source: "CALCULATOR",
             generatedAt: projectData.generatedAt,
             algorithmVersion: projectData.algorithmVersion,
+            layout: JSON.parse(JSON.stringify(layoutData)) as Prisma.InputJsonValue,
           },
           bomData: JSON.parse(JSON.stringify(projectData)) as Prisma.InputJsonValue,
           totalEstimate: projectData.pricing.materialCost,
@@ -347,8 +393,32 @@ export async function createQuoteRequestAction(
         },
       });
 
-      return quoteRequest;
+      return {
+        projectId: project.id,
+        quoteRequestId: quoteRequest.id,
+      };
     });
+
+    sendAdminProjectSavedNotification({
+      saveMode: quoteRequestStatus,
+      projectId: created.projectId,
+      quoteRequestId: created.quoteRequestId,
+      projectName: `Estimate - ${savedAt}`,
+      estimateValue: projectData.pricing.materialCost,
+      city: visibilityCity,
+      totalConnectedLoadKw: projectData.totalConnectedLoadKw,
+      maxDemandKw: projectData.maxDemandKw,
+      phase:
+        projectData.phaseDecision.finalRecommendation === "THREE"
+          ? "3-Phase"
+          : "Single Phase",
+      itemCount: projectData.items.length,
+      bomDataJson: JSON.stringify(projectData, null, 2),
+    }).catch((e) =>
+      logger.error("Email: admin project notification failed", {
+        error: String(e),
+      })
+    );
 
     // Fire-and-forget: notify matching dealers
     if (quoteRequestStatus === "OPEN") {
@@ -367,7 +437,7 @@ export async function createQuoteRequestAction(
           for (const d of dealers) {
             sendNewRfqNotification(d.user.email, {
               dealerName: d.user.name ?? d.companyName,
-              projectName: `Saved Estimate ${savedAt}`,
+              projectName: `Estimate — ${savedAt}`,
               estimateValue: projectData.pricing.materialCost,
               rfqCity: visibilityCity,
             }).catch((e) =>
@@ -376,11 +446,12 @@ export async function createQuoteRequestAction(
           }
         })
         .catch((e) => logger.error("Email: dealer lookup failed", { error: String(e) }));
+
     }
 
     return {
       success: true,
-      quoteRequestId: created.id,
+      quoteRequestId: created.quoteRequestId,
     };
   } catch (err) {
     logger.error("Failed to create quote request", {
@@ -722,3 +793,4 @@ export async function rejectQuoteAction(quoteId: string): Promise<QuoteDecisionR
 
   return { success: false, error: "Failed to reject quote after retries. Please try again." };
 }
+

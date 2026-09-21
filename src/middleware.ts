@@ -13,6 +13,11 @@ export default auth((req) => {
   // NOTE: /login and /register must NOT be in the matcher below,
   // otherwise unauthenticated redirects would loop infinitely.
 
+  // Let demo URLs reach the route layer without any edge auth redirect.
+  if (req.nextUrl.searchParams.get("demo") === "true") {
+    return NextResponse.next();
+  }
+
   // /admin/* → ADMIN role only
   if (pathname.startsWith("/admin")) {
     if (!isLoggedIn || !role) {
@@ -42,6 +47,11 @@ export default auth((req) => {
       return NextResponse.redirect(new URL("/dealer/dashboard", req.url));
     }
   }
+
+  // NOTE: /calculator is intentionally PUBLIC and absent from the matcher.
+  // It is the top of the acquisition funnel — anyone can compute a full BOM
+  // without an account. The wall sits at *saving* an estimate or requesting
+  // quotes, which createQuoteRequestAction enforces server-side.
 
   return NextResponse.next();
 });

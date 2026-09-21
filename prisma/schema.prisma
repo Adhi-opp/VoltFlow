@@ -6,7 +6,15 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+
+  // Runtime queries go through the transaction pooler (Supabase port 6543).
+  // Serverless functions open many short-lived connections; without pooling
+  // they exhaust Postgres connection limits under even modest traffic.
+  url = env("DATABASE_URL")
+
+  // Migrations need a real session — prepared statements and DDL do not work
+  // through a transaction pooler. Session pooler (port 5432) or direct.
+  directUrl = env("DIRECT_URL")
 }
 
 // =======================

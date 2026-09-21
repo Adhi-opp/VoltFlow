@@ -81,7 +81,7 @@ function StatTile({ icon, label, value, highlight }: StatTileProps) {
         {icon}
         <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
       </div>
-      <p className={`text-2xl font-bold tabular-nums ${highlight ? "text-amber-500" : ""}`}>
+      <p className={`text-2xl font-bold tabular-nums ${highlight ? "text-emerald-600" : ""}`}>
         {value}
       </p>
     </div>
@@ -134,6 +134,8 @@ interface EstimateRangeCardProps {
   sessionStatus: SessionStatus;
   sessionRole: SessionRole;
   onSaveProject: (status: "DRAFT" | "OPEN") => void;
+  /** Logged-out visitor wants to save — stash the intent, then go to login. */
+  onRequestAuth: (intent: "DRAFT" | "OPEN") => void;
   isSavingProject: boolean;
   activeSaveMode: "DRAFT" | "OPEN" | null;
   saveFeedback: SaveFeedback | null;
@@ -144,22 +146,23 @@ function EstimateRangeCard({
   sessionStatus,
   sessionRole,
   onSaveProject,
+  onRequestAuth,
   isSavingProject,
   activeSaveMode,
   saveFeedback,
 }: EstimateRangeCardProps) {
   const materialCost = result.pricing.materialCost;
-  const lowBound = Math.round(materialCost * 0.9);
+  const lowBound = Math.round(materialCost * 0.95);
   const highBound = Math.round(materialCost * 1.1);
 
   const isDealer = sessionStatus === "authenticated" && sessionRole === "DEALER";
   const canSave = sessionStatus === "authenticated" && !isDealer;
 
   return (
-    <div className="space-y-4 rounded-lg border-2 border-primary/40 bg-primary/5 p-4">
+    <div className="space-y-4 rounded-2xl border border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50/70 p-5 shadow-sm shadow-emerald-100/80">
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Estimated Material Cost
+          Historical Market Range
         </p>
         <p className="mt-1 text-2xl font-bold tabular-nums text-primary">
           {formatCurrency(lowBound)} – {formatCurrency(highBound)}
@@ -167,8 +170,8 @@ function EstimateRangeCard({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        This is a platform estimate. Actual prices vary by brand, location, and market
-        conditions. Request quotes from local dealers for exact pricing.
+        Range based on historical market data across NCR. Actual prices vary by brand,
+        location, and availability. Request quotes for exact pricing.
       </p>
 
       {sessionStatus === "loading" && (
@@ -176,13 +179,23 @@ function EstimateRangeCard({
       )}
 
       {sessionStatus === "unauthenticated" && (
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" asChild className="flex-1">
-            <Link href="/login?callbackUrl=/calculator">Save as Draft</Link>
-          </Button>
-          <Button asChild className="flex-1">
-            <Link href="/login?callbackUrl=/calculator">Save & Request Quotes</Link>
-          </Button>
+        <div className="space-y-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => onRequestAuth("DRAFT")}
+              className="flex-1"
+            >
+              Save as Draft
+            </Button>
+            <Button onClick={() => onRequestAuth("OPEN")} className="flex-1">
+              Save &amp; Request Quotes
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Sign in to continue — this estimate is kept and picks up right where you
+            left off.
+          </p>
         </div>
       )}
 
@@ -223,7 +236,7 @@ function EstimateRangeCard({
         <p
           className={`rounded-md border px-3 py-2 text-sm ${
             saveFeedback.type === "success"
-              ? "border-green-300 bg-green-50 text-green-700"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
               : "border-destructive/40 bg-destructive/10 text-destructive"
           }`}
         >
@@ -246,8 +259,8 @@ function PhaseDecisionNotice({ result }: { result: EnrichedBOMResult }) {
   if (!isRegulatoryOverride) return null;
 
   return (
-    <div className="flex gap-3 rounded-lg border border-blue-300 bg-blue-50 p-4 text-xs text-blue-800 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-200">
-      <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+    <div className="flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700">
+      <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-700" />
       <p>
         3-Phase recommended: engineering demand is within safe limits ({formatKw(result.maxDemandKw)}),
         but local DISCOM policy ({result.phaseDecision.regulatoryPolicyKey}) typically requires 3-Phase when
@@ -281,11 +294,11 @@ function BOMItemsTab({ items }: { items: BOMItem[] }) {
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             {CATEGORY_LABELS[cat] ?? cat}
           </h3>
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+            <table className="table-striped w-full text-sm">
               <tbody>
                 {catItems.map((item, idx) => (
-                  <tr key={idx} className="border-b transition-colors last:border-0 hover:bg-muted/40">
+                  <tr key={idx} className="border-b border-slate-200/80 transition-colors last:border-0 hover:bg-muted/40">
                     <td className="whitespace-nowrap px-3 py-2.5 text-foreground">{item.description}</td>
                     <td className="px-3 py-2.5 text-right text-muted-foreground">
                       <QuantityLabel item={item} />
@@ -305,8 +318,8 @@ function LoadBreakdownTab({ result }: { result: EnrichedBOMResult }) {
   const { loadBreakdown } = result;
 
   return (
-    <div className="overflow-x-auto rounded-md border">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <table className="table-striped w-full text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
             <th className="whitespace-nowrap px-3 py-2 text-left font-medium text-muted-foreground">Room</th>
@@ -347,8 +360,8 @@ function LoadBreakdownTab({ result }: { result: EnrichedBOMResult }) {
 
 function CircuitsTab({ result }: { result: EnrichedBOMResult }) {
   return (
-    <div className="overflow-x-auto rounded-md border">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <table className="table-striped w-full text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
             <th className="whitespace-nowrap px-3 py-2 text-left font-medium text-muted-foreground">Circuit</th>
@@ -387,20 +400,20 @@ function WarningsPanel({ warnings }: { warnings: string[] }) {
 
   return (
     <Collapsible defaultOpen={false}>
-      <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
+      <div className="rounded-lg border border-amber-200 bg-amber-50">
         <CollapsibleTrigger className="flex w-full items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-            <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+            <span className="text-sm font-semibold text-amber-800">
               {warnings.length} notice{warnings.length !== 1 ? "s" : ""}
             </span>
           </div>
           <ChevronDown className="h-4 w-4 shrink-0 text-amber-500 transition-transform duration-200 [[data-state=open]>&]:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <ul className="space-y-0.5 border-t border-amber-200 px-4 pb-3 pt-2 dark:border-amber-800">
+          <ul className="space-y-0.5 border-t border-amber-200 px-4 pb-3 pt-2">
             {warnings.map((warning, index) => (
-              <li key={index} className="text-xs text-amber-700 dark:text-amber-400">
+              <li key={index} className="text-xs text-amber-800">
                 {warning}
               </li>
             ))}
@@ -429,6 +442,7 @@ interface BOMResultViewProps {
   sessionStatus: SessionStatus;
   sessionRole: SessionRole;
   onSaveProject: (status: "DRAFT" | "OPEN") => void;
+  onRequestAuth: (intent: "DRAFT" | "OPEN") => void;
   isSavingProject: boolean;
   activeSaveMode: "DRAFT" | "OPEN" | null;
   saveFeedback: SaveFeedback | null;
@@ -439,6 +453,7 @@ export function BOMResultView({
   sessionStatus,
   sessionRole,
   onSaveProject,
+  onRequestAuth,
   isSavingProject,
   activeSaveMode,
   saveFeedback,
@@ -459,6 +474,7 @@ export function BOMResultView({
         sessionStatus={sessionStatus}
         sessionRole={sessionRole}
         onSaveProject={onSaveProject}
+        onRequestAuth={onRequestAuth}
         isSavingProject={isSavingProject}
         activeSaveMode={activeSaveMode}
         saveFeedback={saveFeedback}
