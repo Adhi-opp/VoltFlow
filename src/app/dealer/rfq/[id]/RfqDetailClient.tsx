@@ -339,7 +339,7 @@ export function RfqDetailClient({
                     </Badge>
                   </div>
                   {submitted && !existingQuote.id && (
-                    <p className="rounded-md border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-700">
+                    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                       Quote submitted successfully!
                     </p>
                   )}
@@ -352,7 +352,7 @@ export function RfqDetailClient({
                     </p>
                   )}
                   {submitted && (
-                    <p className="rounded-md border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-700">
+                    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                       Quote submitted successfully!
                     </p>
                   )}

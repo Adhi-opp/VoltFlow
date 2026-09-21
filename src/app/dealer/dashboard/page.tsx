@@ -264,7 +264,7 @@ export default async function DealerDashboardPage() {
                 </CardContent>
                 {quote.status === "ACCEPTED" && (
                   <CardFooter className="flex-col items-start gap-1 border-t pt-3 text-sm">
-                    <p className="font-medium text-green-700">
+                    <p className="font-medium text-emerald-700">
                       Homeowner Contact
                     </p>
                     <p>{quote.quoteRequest.project.owner.name}</p>

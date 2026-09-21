@@ -34,18 +34,19 @@ export default function LoginPage() {
     setError(null);
 
     startTransition(async () => {
-      const result = await loginUser({ email, password, redirectTo: callbackUrl });
+      const result = await loginUser({ email, password });
       if (!result.success) {
         setError(result.error);
         return;
       }
+      router.push(callbackUrl ?? "/calculator");
       router.refresh();
     });
   }
 
   return (
     <main className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-md items-center px-4 py-10">
-      <Card className="w-full">
+      <Card className="w-full border-slate-200 bg-white shadow-sm shadow-slate-200/70">
         <CardHeader>
           <CardTitle>Sign In</CardTitle>
           <CardDescription>Use your account credentials to continue.</CardDescription>
@@ -53,7 +54,7 @@ export default function LoginPage() {
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
             {showRegisteredNotice && (
-              <p className="rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-700">
+              <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                 Registration successful. Please sign in.
               </p>
             )}
@@ -92,7 +93,7 @@ export default function LoginPage() {
         <CardFooter>
           <p className="text-sm text-muted-foreground">
             New here?{" "}
-            <Link className="font-medium text-foreground hover:underline" href={registerHref}>
+            <Link className="font-medium text-primary hover:underline" href={registerHref}>
               Create an account
             </Link>
           </p>

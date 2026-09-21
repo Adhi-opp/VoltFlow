@@ -24,35 +24,14 @@ const registerSchema = z
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
-  redirectTo: z.string().trim().min(1).optional(),
 });
 
 export type RegisterUserInput = z.infer<typeof registerSchema>;
 export type LoginUserInput = z.infer<typeof loginSchema>;
-const DEFAULT_LOGIN_REDIRECT = "/calculator";
 
 function formatZodIssues(issues: z.ZodIssue[]): string {
   const cleanMessages = issues.map((issue) => issue.message).filter(Boolean);
   return cleanMessages.join("; ");
-}
-
-function resolveSafeRedirectTo(redirectTo: string | undefined): string {
-  if (!redirectTo) {
-    return DEFAULT_LOGIN_REDIRECT;
-  }
-
-  const trimmed = redirectTo.trim();
-  if (!trimmed.startsWith("/")) {
-    return DEFAULT_LOGIN_REDIRECT;
-  }
-  if (trimmed.startsWith("//")) {
-    return DEFAULT_LOGIN_REDIRECT;
-  }
-  if (trimmed.includes("://")) {
-    return DEFAULT_LOGIN_REDIRECT;
-  }
-
-  return trimmed;
 }
 
 export type RegisterUserResult =
@@ -129,11 +108,19 @@ export async function registerUser(data: RegisterUserInput): Promise<RegisterUse
       userId: user.id,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected registration error.";
+    const raw = error instanceof Error ? error.message : "";
+    const isDbError =
+      raw.includes("FATAL") ||
+      raw.includes("connect") ||
+      raw.includes("Tenant") ||
+      raw.includes("ECONNREFUSED");
+
     return {
       success: false,
       errorCode: "INTERNAL_ERROR",
-      error: message,
+      error: isDbError
+        ? "Unable to reach the database. Please try again in a moment."
+        : "Unexpected registration error. Please try again.",
     };
   }
 }
@@ -150,14 +137,18 @@ export async function loginUser(data: LoginUserInput): Promise<LoginUserResult> 
   }
 
   try {
-    const redirectTo = resolveSafeRedirectTo(parsed.data.redirectTo);
     await signIn("credentials", {
       email: parsed.data.email.trim().toLowerCase(),
       password: parsed.data.password,
-      redirectTo,
+      redirect: false,
     });
     return { success: true };
   } catch (error) {
+    // Next.js internal errors (redirect, notFound) carry a `digest` — always re-throw
+    if (error && typeof error === "object" && "digest" in error) {
+      throw error;
+    }
+
     if (error instanceof AuthError) {
       if (error.type === "CredentialsSignin") {
         return {
@@ -170,10 +161,24 @@ export async function loginUser(data: LoginUserInput): Promise<LoginUserResult> 
       return {
         success: false,
         errorCode: "INTERNAL_ERROR",
-        error: "Authentication failed.",
+        error: "Authentication failed. Please try again.",
       };
     }
 
-    throw error;
+    // DB or network errors — show a friendly message
+    const raw = error instanceof Error ? error.message : "";
+    const isDbError =
+      raw.includes("FATAL") ||
+      raw.includes("connect") ||
+      raw.includes("Tenant") ||
+      raw.includes("ECONNREFUSED");
+
+    return {
+      success: false,
+      errorCode: "INTERNAL_ERROR",
+      error: isDbError
+        ? "Unable to reach the database. Please try again in a moment."
+        : "Authentication failed. Please try again.",
+    };
   }
 }

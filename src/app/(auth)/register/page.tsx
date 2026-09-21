@@ -61,7 +61,7 @@ export default function RegisterPage() {
 
   return (
     <main className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-md items-center px-4 py-10">
-      <Card className="w-full">
+      <Card className="w-full border-slate-200 bg-white shadow-sm shadow-slate-200/70">
         <CardHeader>
           <CardTitle>{`Create ${accountLabel} Account`}</CardTitle>
           <CardDescription>
@@ -131,7 +131,7 @@ export default function RegisterPage() {
         <CardFooter>
           <p className="text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link className="font-medium text-foreground hover:underline" href={loginHref}>
+            <Link className="font-medium text-primary hover:underline" href={loginHref}>
               Sign in
             </Link>
           </p>

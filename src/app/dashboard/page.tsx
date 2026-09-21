@@ -4,6 +4,10 @@ import type { Metadata } from "next";
 import type { QuoteRequestStatus } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  DEMO_DASHBOARD_PROJECTS,
+  DEMO_PROJECT_ID,
+} from "@/lib/demo-data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,6 +77,18 @@ function formatDate(date: Date): string {
   }).format(date);
 }
 
+/** Reformat old-style project names ("Saved Estimate YYYY-MM-DD HH:MM:SS") */
+function cleanProjectName(name: string): string {
+  const match = name.match(/^Saved Estimate (\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const day = parseInt(match[3], 10);
+    const month = months[parseInt(match[2], 10) - 1];
+    return `Estimate — ${day} ${month} ${match[1]}`;
+  }
+  return name;
+}
+
 // ---------------------------------------------------------------------------
 // Badge config
 // ---------------------------------------------------------------------------
@@ -91,25 +107,45 @@ const QUOTE_STATUS_CONFIG: Record<
 // Page
 // ---------------------------------------------------------------------------
 
-export default async function DashboardPage() {
-  const session = await auth();
+interface PageProps {
+  searchParams: Promise<{ demo?: string }>;
+}
 
-  if (!session?.user) {
-    redirect("/login");
+export default async function DashboardPage({ searchParams }: PageProps) {
+  const { demo } = await searchParams;
+  const isDemo = demo === "true";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- demo + Prisma shapes unified
+  let projects: any[];
+
+  if (isDemo) {
+    projects = DEMO_DASHBOARD_PROJECTS;
+  } else {
+    const session = await auth();
+    if (!session?.user) {
+      redirect("/login");
+    }
+    if (session.user.role === "DEALER") {
+      redirect("/dealer/dashboard");
+    }
+    projects = await prisma.project.findMany({
+      where: { ownerId: session.user.id },
+      include: { quoteRequest: true },
+      orderBy: { createdAt: "desc" },
+    });
   }
-
-  if (session.user.role === "DEALER") {
-    redirect("/dealer/dashboard");
-  }
-
-  const projects = await prisma.project.findMany({
-    where: { ownerId: session.user.id },
-    include: { quoteRequest: true },
-    orderBy: { createdAt: "desc" },
-  });
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-14 sm:px-6">
+      {isDemo && (
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+          You are viewing a demo.{" "}
+          <Link href="/register?role=HOMEOWNER" className="font-semibold underline">
+            Create a free account &rarr;
+          </Link>
+        </div>
+      )}
+
       <div className="mb-8 flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">My Projects</h1>
         <Button asChild>
@@ -135,16 +171,16 @@ export default async function DashboardPage() {
             const estimate =
               bom?.pricing.totalEstimate ?? project.totalEstimate;
             const qr = project.quoteRequest;
-            const statusConfig = qr
-              ? QUOTE_STATUS_CONFIG[qr.status]
+            const statusConfig = qr?.status in QUOTE_STATUS_CONFIG
+              ? QUOTE_STATUS_CONFIG[qr.status as QuoteRequestStatus]
               : null;
 
             return (
-              <Card key={project.id}>
+              <Card key={project.id} className="hover-lift">
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-base leading-snug">
-                      {project.projectName}
+                      {cleanProjectName(project.projectName)}
                     </CardTitle>
                     {statusConfig && (
                       <Badge variant={statusConfig.variant}>
@@ -190,7 +226,7 @@ export default async function DashboardPage() {
                   </span>
                   {qr && (
                     <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/dashboard/project/${project.id}/quotes`}>
+                      <Link href={isDemo ? `/dashboard/project/${DEMO_PROJECT_ID}/quotes?demo=true` : `/dashboard/project/${project.id}/quotes`}>
                         View Quotes
                         {qr.quoteCount > 0 && (
                           <Badge variant="secondary" className="ml-1.5">

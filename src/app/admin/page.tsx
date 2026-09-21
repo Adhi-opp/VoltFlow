@@ -88,7 +88,7 @@ export default async function AdminDashboardPage() {
       </div>
 
       {pendingDealers > 0 && (
-        <div className="mb-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           {pendingDealers} dealer{pendingDealers !== 1 ? "s" : ""} awaiting
           approval.{" "}
           <Link

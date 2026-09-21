@@ -70,28 +70,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, user }) {
+      // Populate token on initial sign-in only (not on every request).
+      // This avoids a DB round-trip on every page load / sign-out, which
+      // caused timeouts on Supabase nano tier.
       if (user) {
         token.id = user.id;
         token.role = (user as { role?: Role }).role;
         token.isActive = (user as { isActive?: boolean }).isActive;
-      }
-
-      const userId = typeof token.id === "string" ? token.id : token.sub;
-      if (typeof userId === "string") {
-        const dbUser = await prisma.user.findUnique({
-          where: { id: userId },
-          select: {
-            id: true,
-            role: true,
-            isActive: true,
-          },
-        });
-
-        if (dbUser) {
-          token.id = dbUser.id;
-          token.role = dbUser.role;
-          token.isActive = dbUser.isActive;
-        }
       }
 
       return token;

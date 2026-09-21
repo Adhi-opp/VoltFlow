@@ -36,7 +36,6 @@ interface QuoteData {
 
 interface Props {
   quotes: QuoteData[];
-  rfqStatus: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +73,7 @@ function statusVariant(
 // Component
 // ---------------------------------------------------------------------------
 
-export function QuotesClient({ quotes: initialQuotes, rfqStatus }: Props) {
+export function QuotesClient({ quotes: initialQuotes }: Props) {
   const [quotes, setQuotes] = useState(initialQuotes);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +149,7 @@ export function QuotesClient({ quotes: initialQuotes, rfqStatus }: Props) {
               key={quote.id}
               className={
                 quote.status === "ACCEPTED"
-                  ? "border-green-500/50 ring-1 ring-green-500/20"
+                  ? "border-emerald-200 ring-1 ring-emerald-100"
                   : ""
               }
             >
@@ -169,7 +168,7 @@ export function QuotesClient({ quotes: initialQuotes, rfqStatus }: Props) {
                       {quote.status}
                     </Badge>
                     {isLowest && isSubmitted && (
-                      <span className="text-xs font-medium text-green-600">
+                      <span className="text-xs font-medium text-emerald-600">
                         Lowest
                       </span>
                     )}
@@ -208,15 +207,15 @@ export function QuotesClient({ quotes: initialQuotes, rfqStatus }: Props) {
               </CardContent>
 
               {quote.status === "ACCEPTED" && (quote.dealerEmail || quote.dealerPhone) && (
-                <div className="mx-6 mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm">
-                  <p className="mb-1 font-medium text-green-800">
+                <div className="mx-6 mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm">
+                  <p className="mb-1 font-medium text-emerald-700">
                     Dealer Contact Info
                   </p>
                   {quote.dealerEmail && (
-                    <p className="text-green-700">Email: {quote.dealerEmail}</p>
+                    <p className="text-emerald-700">Email: {quote.dealerEmail}</p>
                   )}
                   {quote.dealerPhone && (
-                    <p className="text-green-700">Phone: {quote.dealerPhone}</p>
+                    <p className="text-emerald-700">Phone: {quote.dealerPhone}</p>
                   )}
                 </div>
               )}
