@@ -110,14 +110,24 @@ export default async function Home() {
             </Button>
           </div>
         ) : (
-          <div className="animate-fade-in-up delay-300 mt-10 flex flex-col items-center gap-6">
+          <div className="animate-fade-in-up delay-300 mt-10 flex flex-col items-center gap-3">
             <Button
               asChild
               size="lg"
               className="h-12 px-10 text-base font-semibold shadow-sm shadow-emerald-200/80"
             >
-              <Link href="/login">Get Started</Link>
+              <Link href="/calculator">Calculate Your Estimate</Link>
             </Button>
+            <p className="text-sm text-slate-500">
+              Free, and no account needed.{" "}
+              <Link
+                href="/login"
+                className="font-medium text-slate-700 underline-offset-4 hover:underline"
+              >
+                Sign in
+              </Link>{" "}
+              only when you want to save it or get dealer quotes.
+            </p>
           </div>
         )}
 

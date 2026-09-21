@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useState, useTransition } from "react";
 import { loginUser } from "@/features/auth/actions";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,7 +18,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export default function LoginPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const showRegisteredNotice = searchParams.get("registered") === "1";
   const callbackUrl = searchParams.get("callbackUrl") ?? undefined;
@@ -39,8 +39,14 @@ export default function LoginPage() {
         setError(result.error);
         return;
       }
-      router.push(callbackUrl ?? "/calculator");
-      router.refresh();
+
+      // Full navigation, not router.push. signIn() sets the session cookie on
+      // the server, but SessionProvider was seeded with the signed-out session
+      // when this page first loaded and a client-side push does not re-seed it.
+      // useSession() would still report "unauthenticated" on the next page,
+      // which silently breaks anything gated on it — including resuming a
+      // pending estimate save, which would bounce the user straight back here.
+      window.location.assign(safeRedirectPath(callbackUrl));
     });
   }
 

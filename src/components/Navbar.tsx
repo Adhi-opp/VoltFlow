@@ -17,6 +17,15 @@ export function Navbar() {
         </Link>
 
         <nav className="flex items-center gap-2">
+          {/* Always reachable: the calculator is the product, not a member
+              feature. Dealers are the exception — they quote, they do not
+              create estimates. */}
+          {session?.user?.role !== "DEALER" && (
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/calculator">Calculator</Link>
+            </Button>
+          )}
+
           {status === "authenticated" && (
             <>
               {session?.user?.role === "ADMIN" && (
