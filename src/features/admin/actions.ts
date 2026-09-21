@@ -31,7 +31,9 @@ export async function approveDealerAction(
       include: { user: { select: { email: true, name: true } } },
     });
 
-    sendDealerApprovedNotification(profile.user.email, {
+    // Awaited: serverless may freeze the invocation once the response
+    // returns, dropping an in-flight send.
+    await sendDealerApprovedNotification(profile.user.email, {
       dealerName: profile.user.name ?? "Dealer",
       companyName: profile.companyName,
     }).catch((e) =>
@@ -65,7 +67,7 @@ export async function rejectDealerAction(
       include: { user: { select: { email: true, name: true } } },
     });
 
-    sendDealerRejectedNotification(profile.user.email, {
+    await sendDealerRejectedNotification(profile.user.email, {
       dealerName: profile.user.name ?? "Dealer",
       companyName: profile.companyName,
     }).catch((e) =>

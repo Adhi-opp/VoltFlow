@@ -20,8 +20,9 @@ export default function TermsPage() {
           <p>
             WireMart is a two-sided marketplace connecting homeowners and
             contractors with electrical material dealers. The platform provides an
-            IS 732:2019 compliant Bill of Materials calculator and a Request for
-            Quotation engine.
+            Bill of Materials calculator aligned with IS 732 standard practice, and
+            a Request for Quotation engine. Outputs are informational estimates, not
+            certified electrical designs.
           </p>
         </section>
 

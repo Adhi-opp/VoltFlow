@@ -375,7 +375,7 @@ export function CalculatorShell() {
                   <h2 className="text-lg font-semibold">Bill of Materials</h2>
                   <p className="text-sm text-muted-foreground">
                     {result.circuits.length > 0
-                      ? `${result.totalCircuits} circuits · IS 732:2019 compliant`
+                      ? `${result.totalCircuits} circuits · aligned with IS 732 practice · estimate only`
                       : "No circuits generated"}
                   </p>
                 </div>

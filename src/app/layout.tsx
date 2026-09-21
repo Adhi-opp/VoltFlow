@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     template: "%s | WireMart",
   },
   description:
-    "India's electrical wiring marketplace. IS 732:2019 compliant BOM calculator with competitive dealer quotes.",
+    "India's electrical wiring marketplace. BOM calculator aligned with IS 732 standard practice, with competitive dealer quotes.",
   openGraph: {
     siteName: "WireMart",
     type: "website",

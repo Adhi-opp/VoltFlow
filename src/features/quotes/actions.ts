@@ -399,7 +399,11 @@ export async function createQuoteRequestAction(
       };
     });
 
-    sendAdminProjectSavedNotification({
+    // Awaited, not fire-and-forget: a serverless runtime may freeze this
+    // invocation the moment the response is returned, dropping any promise
+    // still in flight. The admin BOM email is how quotes get sourced
+    // manually, so losing it silently would break the whole early loop.
+    await sendAdminProjectSavedNotification({
       saveMode: quoteRequestStatus,
       projectId: created.projectId,
       quoteRequestId: created.quoteRequestId,
@@ -415,15 +419,17 @@ export async function createQuoteRequestAction(
       itemCount: projectData.items.length,
       bomDataJson: JSON.stringify(projectData, null, 2),
     }).catch((e) =>
+      // Swallowed deliberately: a failed notification must not fail the save.
       logger.error("Email: admin project notification failed", {
         error: String(e),
       })
     );
 
-    // Fire-and-forget: notify matching dealers
+    // Notify matching dealers. allSettled so one bad address cannot reject
+    // the batch, and awaited so none of the sends are cut off mid-flight.
     if (quoteRequestStatus === "OPEN") {
-      prisma.dealerProfile
-        .findMany({
+      try {
+        const dealers = await prisma.dealerProfile.findMany({
           where: {
             approvalStatus: "APPROVED",
             OR: [
@@ -432,21 +438,30 @@ export async function createQuoteRequestAction(
             ],
           },
           include: { user: { select: { email: true, name: true } } },
-        })
-        .then((dealers) => {
-          for (const d of dealers) {
+        });
+
+        const results = await Promise.allSettled(
+          dealers.map((d) =>
             sendNewRfqNotification(d.user.email, {
               dealerName: d.user.name ?? d.companyName,
               projectName: `Estimate — ${savedAt}`,
               estimateValue: projectData.pricing.materialCost,
               rfqCity: visibilityCity,
-            }).catch((e) =>
-              logger.error("Email: new RFQ notification failed", { error: String(e), dealer: d.user.email })
-            );
-          }
-        })
-        .catch((e) => logger.error("Email: dealer lookup failed", { error: String(e) }));
+            })
+          )
+        );
 
+        results.forEach((r, i) => {
+          if (r.status === "rejected") {
+            logger.error("Email: new RFQ notification failed", {
+              error: String(r.reason),
+              dealer: dealers[i]?.user.email,
+            });
+          }
+        });
+      } catch (e) {
+        logger.error("Email: dealer lookup failed", { error: String(e) });
+      }
     }
 
     return {
@@ -503,33 +518,37 @@ export async function submitQuoteAction(raw: SubmitQuoteInput): Promise<SubmitQu
       const outcome = await submitQuoteTransaction(parsed.data, dealerId);
       const result = mapOutcomeToResult(outcome);
 
-      // Fire-and-forget: notify homeowner of new quote
+      // Awaited so the send is not cut off when the response returns.
       if (result.success && !result.idempotent) {
-        prisma.quoteRequest
-          .findUnique({
-            where: { id: parsed.data.quoteRequestId },
-            include: {
-              project: { include: { owner: { select: { email: true, name: true } } } },
-            },
-          })
-          .then((qr) => {
-            if (!qr) return;
-            const dealerProfile = prisma.dealerProfile.findUnique({
+        try {
+          const [qr, dp] = await Promise.all([
+            prisma.quoteRequest.findUnique({
+              where: { id: parsed.data.quoteRequestId },
+              include: {
+                project: { include: { owner: { select: { email: true, name: true } } } },
+              },
+            }),
+            prisma.dealerProfile.findUnique({
               where: { userId: dealerId },
               select: { companyName: true },
-            });
-            return dealerProfile.then((dp) => {
-              sendQuoteReceivedNotification(qr.project.owner.email, {
-                homeownerName: qr.project.owner.name ?? "Homeowner",
-                projectName: qr.project.projectName,
-                dealerCompany: dp?.companyName ?? "A dealer",
-                quotePrice: parsed.data.totalPrice,
-              }).catch((e) =>
-                logger.error("Email: quote received notification failed", { error: String(e) })
-              );
-            });
-          })
-          .catch((e) => logger.error("Email: owner lookup failed", { error: String(e) }));
+            }),
+          ]);
+
+          if (qr) {
+            await sendQuoteReceivedNotification(qr.project.owner.email, {
+              homeownerName: qr.project.owner.name ?? "Homeowner",
+              projectName: qr.project.projectName,
+              dealerCompany: dp?.companyName ?? "A dealer",
+              quotePrice: parsed.data.totalPrice,
+            }).catch((e) =>
+              logger.error("Email: quote received notification failed", {
+                error: String(e),
+              })
+            );
+          }
+        } catch (e) {
+          logger.error("Email: owner lookup failed", { error: String(e) });
+        }
       }
 
       return result;
@@ -640,9 +659,11 @@ export async function acceptQuoteAction(quoteId: string): Promise<QuoteDecisionR
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
-      // Fire-and-forget: email notifications after acceptance
-      prisma.quote
-        .findUnique({
+      // Awaited: the winning dealer's email carries the homeowner's contact
+      // details, which is the entire payoff of accepting a quote. Dropping
+      // it would strand both sides.
+      try {
+        const q = await prisma.quote.findUnique({
           where: { id: quoteId },
           include: {
             dealer: { select: { email: true, name: true, dealerProfile: { select: { companyName: true } } } },
@@ -653,27 +674,40 @@ export async function acceptQuoteAction(quoteId: string): Promise<QuoteDecisionR
               },
             },
           },
-        })
-        .then((q) => {
-          if (!q) return;
+        });
+
+        if (q) {
           const owner = q.quoteRequest.project.owner;
-          // Notify winning dealer with homeowner contact
-          sendQuoteAcceptedNotification(q.dealer.email, {
-            dealerName: q.dealer.name ?? q.dealer.dealerProfile?.companyName ?? "Dealer",
-            projectName: q.quoteRequest.project.projectName,
-            homeownerName: owner.name ?? "Homeowner",
-            homeownerEmail: owner.email,
-            homeownerPhone: owner.phone,
-          }).catch((e) => logger.error("Email: accept notification failed", { error: String(e) }));
-          // Notify rejected dealers
-          for (const rq of q.quoteRequest.quotes) {
-            sendQuoteRejectedNotification(rq.dealer.email, {
-              dealerName: rq.dealer.name ?? "Dealer",
+          const sends: Promise<unknown>[] = [
+            // Winning dealer, with homeowner contact
+            sendQuoteAcceptedNotification(q.dealer.email, {
+              dealerName: q.dealer.name ?? q.dealer.dealerProfile?.companyName ?? "Dealer",
               projectName: q.quoteRequest.project.projectName,
-            }).catch((e) => logger.error("Email: reject notification failed", { error: String(e) }));
+              homeownerName: owner.name ?? "Homeowner",
+              homeownerEmail: owner.email,
+              homeownerPhone: owner.phone,
+            }),
+            // Everyone who lost
+            ...q.quoteRequest.quotes.map((rq) =>
+              sendQuoteRejectedNotification(rq.dealer.email, {
+                dealerName: rq.dealer.name ?? "Dealer",
+                projectName: q.quoteRequest.project.projectName,
+              })
+            ),
+          ];
+
+          const results = await Promise.allSettled(sends);
+          for (const r of results) {
+            if (r.status === "rejected") {
+              logger.error("Email: post-accept notification failed", {
+                error: String(r.reason),
+              });
+            }
           }
-        })
-        .catch((e) => logger.error("Email: post-accept lookup failed", { error: String(e) }));
+        }
+      } catch (e) {
+        logger.error("Email: post-accept lookup failed", { error: String(e) });
+      }
 
       return { success: true };
     } catch (err) {
@@ -745,23 +779,27 @@ export async function rejectQuoteAction(quoteId: string): Promise<QuoteDecisionR
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
-      // Fire-and-forget: notify rejected dealer
-      prisma.quote
-        .findUnique({
+      // Awaited so the send survives the response returning.
+      try {
+        const q = await prisma.quote.findUnique({
           where: { id: quoteId },
           include: {
             dealer: { select: { email: true, name: true } },
             quoteRequest: { include: { project: { select: { projectName: true } } } },
           },
-        })
-        .then((q) => {
-          if (!q) return;
-          sendQuoteRejectedNotification(q.dealer.email, {
+        });
+
+        if (q) {
+          await sendQuoteRejectedNotification(q.dealer.email, {
             dealerName: q.dealer.name ?? "Dealer",
             projectName: q.quoteRequest.project.projectName,
-          }).catch((e) => logger.error("Email: reject notification failed", { error: String(e) }));
-        })
-        .catch((e) => logger.error("Email: post-reject lookup failed", { error: String(e) }));
+          }).catch((e) =>
+            logger.error("Email: reject notification failed", { error: String(e) })
+          );
+        }
+      } catch (e) {
+        logger.error("Email: post-reject lookup failed", { error: String(e) });
+      }
 
       return { success: true };
     } catch (err) {

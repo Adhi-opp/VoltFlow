@@ -21,7 +21,7 @@ import {
 export const metadata: Metadata = {
   title: "Electrical Wiring Marketplace | Get Dealer Quotes",
   description:
-    "Calculate your home electrical wiring BOM and get competitive quotes from verified dealers in your city. IS 732:2019 compliant estimates for NCR.",
+    "Calculate your home electrical wiring BOM and get competitive quotes from verified dealers in your city. Estimates aligned with IS 732 standard practice, for NCR.",
   openGraph: {
     title: "WireMart - Electrical Wiring Marketplace",
     description:

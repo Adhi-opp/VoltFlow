@@ -43,7 +43,7 @@ export default function PrivacyPage() {
           </h2>
           <ul className="ml-4 list-disc space-y-1">
             <li>Match homeowners with relevant local dealers</li>
-            <li>Generate IS 732-compliant electrical estimates</li>
+            <li>Generate electrical estimates aligned with IS 732 practice</li>
             <li>Send transactional email notifications</li>
             <li>Improve our estimation algorithms</li>
           </ul>

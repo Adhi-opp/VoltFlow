@@ -88,7 +88,42 @@ async function main() {
     },
   });
 
-  console.log("Seed complete.");
+  // ---------------------------------------------------------------------
+  // PriceIndex — effective dealer rates per metre of copper wire
+  // ---------------------------------------------------------------------
+  // Until this table has rows, loadRateCardFromDb() silently falls back to
+  // the hardcoded RATE_CARD in costEngine.ts, so the dynamic pricing path
+  // never actually runs. Seeding it activates that path.
+  //
+  // wireType MUST start with the gauge in "<n> sq mm" form — loadRatesFromDb
+  // parses the leading number to map onto WIRE_1_5, WIRE_2_5 and so on.
+  // Rows that do not match that shape are ignored, and non-wire items (MCBs,
+  // conduit, switchgear) always use the hardcoded rates.
+  //
+  // These values intentionally match the RATE_CARD entries marked FINAL, so
+  // seeding changes no estimate. They are EFFECTIVE trade prices, i.e. after
+  // the dealer discount circular, not MRP.
+  //
+  // NOTE: verify against a current dealer circular before trusting these.
+  // An alternative set was proposed at 1.5→26, 2.5→42, 4.0→64, which looks
+  // like MRP before the 40-55% trade discount. Adopting it would raise every
+  // estimate by roughly 20%, since wire is about half of material cost.
+  const wireRates = [
+    { wireType: "1.5 sq mm FR PVC", brand: "Polycab", unitPrice: 18 },
+    { wireType: "2.5 sq mm FR PVC", brand: "Polycab", unitPrice: 28 },
+    { wireType: "4.0 sq mm FR PVC", brand: "Polycab", unitPrice: 48 },
+    { wireType: "6.0 sq mm FR PVC", brand: "Polycab", unitPrice: 72 },
+  ];
+
+  for (const rate of wireRates) {
+    await prisma.priceIndex.upsert({
+      where: { wireType_brand: { wireType: rate.wireType, brand: rate.brand } },
+      update: { unitPrice: rate.unitPrice, effectiveDate: new Date() },
+      create: { ...rate, unit: "meter" },
+    });
+  }
+
+  console.log(`Seed complete. PriceIndex rows: ${wireRates.length}`);
 }
 
 main()
