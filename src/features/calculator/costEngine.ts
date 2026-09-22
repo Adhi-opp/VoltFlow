@@ -40,6 +40,17 @@ export class PricingDataError extends Error {
   }
 }
 
+/**
+ * Grade uplift from standard FR wire to FRLS / ZHFR.
+ *
+ * This applies to the cable line only — conduit, switchgear and labour do not
+ * move with wire grade or copper. Deriving the upper bound from actual cable
+ * spend rather than a flat multiple on the total keeps the range honest: a
+ * 3BHK runs roughly 48% cable, so this lands near +14% on the total, but a
+ * switchgear-heavy job correctly shows a tighter band.
+ */
+const WIRE_GRADE_PREMIUM = 0.3;
+
 export type EnrichedBOMResult = BOMResult & {
   pricing: {
     materialCost: number;
@@ -48,6 +59,15 @@ export type EnrichedBOMResult = BOMResult & {
     laborBreakdown: LaborBreakdown;
     surplusMetersTotal: number;
     surplusValueTotal: number;
+
+    /** Cable spend alone — the copper- and grade-sensitive portion. */
+    cableCost: number;
+    /** cableCost / materialCost. Drives the width of the range below. */
+    cableSharePct: number;
+    /** Standard FR grade at current rates. */
+    lowEstimate: number;
+    /** Same BOM specified in FRLS / ZHFR. */
+    highEstimate: number;
   };
 };
 
@@ -184,6 +204,7 @@ export function applyPricing(
   rateCard: RateCard = RATE_CARD
 ): EnrichedBOMResult {
   let materialCost = 0;
+  let cableCost = 0;
   let surplusMetersTotal = 0;
   let surplusValueTotal = 0;
   const missingCodes = new Set<PricingCode>();
@@ -197,9 +218,11 @@ export function applyPricing(
     }
 
     if (priceConfig.basis === "per_meter") {
-      materialCost += priceConfig.rate * getMeterQuantity(item);
+      const lineCost = priceConfig.rate * getMeterQuantity(item);
+      materialCost += lineCost;
 
       if (item.category === "WIRE" || item.category === "EARTH_WIRE") {
+        cableCost += lineCost;
         surplusMetersTotal += item.surplusMeters;
         surplusValueTotal += item.surplusMeters * priceConfig.rate;
       }
@@ -216,6 +239,12 @@ export function applyPricing(
   const { laborCost, laborBreakdown } = computeLabor(extractLaborInputs(result));
   const totalEstimate = materialCost + laborCost;
 
+  // Range, not a single number. The low bound is this BOM in standard FR
+  // cable; the high bound is the same BOM specified in FRLS/ZHFR. Only the
+  // cable line moves, so the band widens or narrows with cable share.
+  const lowEstimate = totalEstimate;
+  const highEstimate = totalEstimate + cableCost * WIRE_GRADE_PREMIUM;
+
   return {
     ...result,
     pricing: {
@@ -225,6 +254,10 @@ export function applyPricing(
       laborBreakdown,
       surplusMetersTotal,
       surplusValueTotal,
+      cableCost,
+      cableSharePct: materialCost > 0 ? cableCost / materialCost : 0,
+      lowEstimate,
+      highEstimate,
     },
   };
 }

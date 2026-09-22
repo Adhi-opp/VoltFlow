@@ -18,7 +18,7 @@ import {
 import { QuotesClient } from "./QuotesClient";
 
 export const metadata: Metadata = {
-  title: "Compare Quotes — WireMart",
+  title: "Compare Quotes — PhaseZero",
 };
 
 /** Reformat old-style project names ("Saved Estimate YYYY-MM-DD HH:MM:SS") */
@@ -47,6 +47,7 @@ export default async function QuotesPage({ params, searchParams }: PageProps) {
   // ── Demo mode: completely bypass auth + Prisma (params.id ignored) ──────
   let projectName: string;
   let rfqStatus: string;
+  let projectEstimate: number | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- demo + Prisma shapes unified
   let quotes: any[];
 
@@ -54,6 +55,7 @@ export default async function QuotesPage({ params, searchParams }: PageProps) {
     projectName = DEMO_PROJECT_NAME;
     rfqStatus = DEMO_RFQ_STATUS;
     quotes = DEMO_QUOTES;
+    projectEstimate = 85000;
   } else {
     const session = await auth();
     if (!session?.user) {
@@ -100,6 +102,7 @@ export default async function QuotesPage({ params, searchParams }: PageProps) {
     const rfq = project.quoteRequest;
     projectName = project.projectName;
     rfqStatus = rfq?.status ?? "CLOSED";
+    projectEstimate = project.totalEstimate;
     quotes =
       rfq?.quotes.map((q) => ({
         id: q.id,
@@ -207,7 +210,7 @@ export default async function QuotesPage({ params, searchParams }: PageProps) {
           </div>
         )
       ) : (
-        <QuotesClient quotes={quotes} />
+        <QuotesClient quotes={quotes} projectEstimate={projectEstimate} />
       )}
     </main>
   );

@@ -13,7 +13,7 @@ export function Navbar() {
     <header className="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-slate-50/85 backdrop-blur supports-[backdrop-filter]:bg-slate-50/70">
       <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-4 sm:px-6">
         <Link href="/" className="text-lg font-bold tracking-tight text-slate-900">
-          WIREMART
+          PHASEZERO
         </Link>
 
         <nav className="flex items-center gap-2">

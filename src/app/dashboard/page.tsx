@@ -10,17 +10,9 @@ import {
 } from "@/lib/demo-data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 
 export const metadata: Metadata = {
-  title: "Dashboard — WireMart",
+  title: "Dashboard — PhaseZero",
   description: "View and manage your saved electrical estimates.",
 };
 
@@ -154,92 +146,116 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       </div>
 
       {projects.length === 0 ? (
-        <Card className="py-16 text-center">
-          <CardContent>
-            <p className="text-muted-foreground">
-              You have not saved any estimates yet.
-            </p>
-            <Button asChild className="mt-4">
-              <Link href="/calculator">Create Your First Estimate</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="border border-slate-200 bg-white px-4 py-14 text-center">
+          <p className="text-sm text-slate-500">
+            No saved estimates yet.
+          </p>
+          <Button asChild className="mt-4">
+            <Link href="/calculator">Create Your First Estimate</Link>
+          </Button>
+        </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => {
-            const bom = parseBomData(project.bomData);
-            const estimate =
-              bom?.pricing.totalEstimate ?? project.totalEstimate;
-            const qr = project.quoteRequest;
-            const statusConfig = qr?.status in QUOTE_STATUS_CONFIG
-              ? QUOTE_STATUS_CONFIG[qr.status as QuoteRequestStatus]
-              : null;
+        /* A register of projects, not a gallery. One row per estimate so
+           load, demand and value can be compared down a column. */
+        <div className="border border-slate-200 bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-[13px]">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="spec-label px-3 py-2 text-left font-medium">
+                    Project
+                  </th>
+                  <th className="spec-label px-3 py-2 text-right font-medium">
+                    Connected
+                  </th>
+                  <th className="spec-label px-3 py-2 text-right font-medium">
+                    Demand
+                  </th>
+                  <th className="spec-label px-3 py-2 text-right font-medium">
+                    Estimate
+                  </th>
+                  <th className="spec-label px-3 py-2 text-right font-medium">
+                    Status
+                  </th>
+                  <th className="spec-label px-3 py-2 text-right font-medium">
+                    Quotes
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {projects.map((project) => {
+                  const bom = parseBomData(project.bomData);
+                  const estimate =
+                    bom?.pricing.totalEstimate ?? project.totalEstimate;
+                  const qr = project.quoteRequest;
+                  const statusConfig =
+                    qr?.status in QUOTE_STATUS_CONFIG
+                      ? QUOTE_STATUS_CONFIG[qr.status as QuoteRequestStatus]
+                      : null;
 
-            return (
-              <Card key={project.id} className="hover-lift">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="text-base leading-snug">
-                      {cleanProjectName(project.projectName)}
-                    </CardTitle>
-                    {statusConfig && (
-                      <Badge variant={statusConfig.variant}>
-                        {statusConfig.label}
-                      </Badge>
-                    )}
-                  </div>
-                  <CardDescription>{formatDate(project.createdAt)}</CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Estimate</span>
-                    <span className="font-semibold tabular-nums">
-                      {estimate != null ? formatCurrency(estimate) : "N/A"}
-                    </span>
-                  </div>
-                  {bom && (
-                    <>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          Connected Load
+                  return (
+                    <tr
+                      key={project.id}
+                      className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/70"
+                    >
+                      <td className="px-3 py-2.5">
+                        <span className="font-medium text-slate-900">
+                          {cleanProjectName(project.projectName)}
                         </span>
-                        <span className="tabular-nums">
-                          {bom.totalConnectedLoadKw.toFixed(2)} kW
+                        <span className="block text-[11px] text-slate-500">
+                          {formatDate(project.createdAt)} ·{" "}
+                          {project.status.replace("_", " ")}
                         </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          Max Demand
-                        </span>
-                        <span className="tabular-nums">
-                          {bom.maxDemandKw.toFixed(2)} kW
-                        </span>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-
-                <CardFooter className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    Status: {project.status.replace("_", " ")}
-                  </span>
-                  {qr && (
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={isDemo ? `/dashboard/project/${DEMO_PROJECT_ID}/quotes?demo=true` : `/dashboard/project/${project.id}/quotes`}>
-                        View Quotes
-                        {qr.quoteCount > 0 && (
-                          <Badge variant="secondary" className="ml-1.5">
-                            {qr.quoteCount}
+                      </td>
+                      <td className="spec-num px-3 py-2.5 text-right text-slate-600">
+                        {bom ? `${bom.totalConnectedLoadKw.toFixed(2)} kW` : "—"}
+                      </td>
+                      <td className="spec-num px-3 py-2.5 text-right text-slate-600">
+                        {bom ? `${bom.maxDemandKw.toFixed(2)} kW` : "—"}
+                      </td>
+                      <td className="spec-num px-3 py-2.5 text-right font-semibold text-slate-900">
+                        {estimate != null ? formatCurrency(estimate) : "—"}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        {statusConfig ? (
+                          <Badge variant={statusConfig.variant}>
+                            {statusConfig.label}
                           </Badge>
+                        ) : (
+                          <span className="text-slate-400">—</span>
                         )}
-                      </Link>
-                    </Button>
-                  )}
-                </CardFooter>
-              </Card>
-            );
-          })}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        {qr ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            asChild
+                          >
+                            <Link
+                              href={
+                                isDemo
+                                  ? `/dashboard/project/${DEMO_PROJECT_ID}/quotes?demo=true`
+                                  : `/dashboard/project/${project.id}/quotes`
+                              }
+                            >
+                              View
+                              <span className="spec-num ml-1.5 border border-slate-300 px-1 text-[11px]">
+                                {qr.quoteCount}
+                              </span>
+                            </Link>
+                          </Button>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </main>

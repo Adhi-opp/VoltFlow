@@ -23,7 +23,7 @@
 
 import type { LayoutInput } from "@/features/calculator/layoutTypes";
 
-const STORAGE_KEY = "wiremart:pending-estimate:v1";
+const STORAGE_KEY = "phasezero:pending-estimate:v1";
 
 /** Stale layouts are dropped — a week-old tab should not resurrect an estimate. */
 const TTL_MS = 24 * 60 * 60 * 1000;

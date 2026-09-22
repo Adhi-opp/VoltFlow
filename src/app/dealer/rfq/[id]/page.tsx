@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { RfqDetailClient } from "./RfqDetailClient";
 
 export const metadata: Metadata = {
-  title: "Quote Request — WireMart",
+  title: "Quote Request — PhaseZero",
 };
 
 // ---------------------------------------------------------------------------

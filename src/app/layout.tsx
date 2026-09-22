@@ -18,16 +18,16 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL || "https://wiremart.in"
+    process.env.NEXT_PUBLIC_APP_URL || "https://phasezero.in"
   ),
   title: {
-    default: "WireMart — Electrical BOM Calculator & Marketplace",
-    template: "%s | WireMart",
+    default: "PhaseZero — Electrical BOM Calculator & Marketplace",
+    template: "%s | PhaseZero",
   },
   description:
     "India's electrical wiring marketplace. BOM calculator aligned with IS 732 standard practice, with competitive dealer quotes.",
   openGraph: {
-    siteName: "WireMart",
+    siteName: "PhaseZero",
     type: "website",
     locale: "en_IN",
   },

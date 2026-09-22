@@ -1,14 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import {
-  ArrowRight,
-  BadgeCheck,
-  House,
-  ShieldCheck,
-  Store,
-} from "lucide-react";
+import { ArrowRight, House, ShieldCheck, Store } from "lucide-react";
 import { auth } from "@/auth";
-import { getMonthlyGmv } from "@/lib/gmv";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,35 +16,11 @@ export const metadata: Metadata = {
   description:
     "Calculate your home electrical wiring BOM and get competitive quotes from verified dealers in your city. Estimates aligned with IS 732 standard practice, for NCR.",
   openGraph: {
-    title: "WireMart - Electrical Wiring Marketplace",
+    title: "PhaseZero - Electrical Wiring Marketplace",
     description:
-      "Free IS 732 BOM calculator + competitive dealer quotes for Indian homes.",
+      "Free IS 732-aligned BOM calculator plus competing wholesale quotes from verified local dealers.",
   },
 };
-
-async function GmvTicker() {
-  const gmv = await getMonthlyGmv();
-
-  const formatted = new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-    notation: "compact",
-  }).format(gmv);
-
-  return (
-    <div className="animate-fade-in-up delay-300 mx-auto mt-8 inline-flex flex-wrap items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-sm shadow-slate-200/70">
-      <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-        <BadgeCheck className="h-3.5 w-3.5 text-emerald-600" />
-        Verified GMV
-      </span>
-      <span className="text-sm font-semibold tabular-nums text-emerald-600">
-        {formatted}
-      </span>
-      <span className="text-sm text-slate-500">estimated this month</span>
-    </div>
-  );
-}
 
 export default async function Home() {
   const session = await auth();
@@ -75,20 +44,21 @@ export default async function Home() {
             Modern procurement for residential electrical projects
           </div>
 
-          <h1 className="animate-fade-in-up delay-100 mt-8 text-5xl font-bold tracking-tight text-slate-950 sm:text-6xl md:text-7xl">
-            Clear BOMs. Faster quotes.
-            <span className="block text-slate-700">
-              A fintech-style frontend for wiring projects.
-            </span>
+          <h1 className="animate-fade-in-up delay-100 mt-8 text-4xl font-bold tracking-tight text-slate-950 sm:text-5xl md:text-6xl">
+            Know exactly what wiring
+            <span className="block text-slate-700">your house needs.</span>
           </h1>
 
-          <p className="animate-fade-in-up delay-200 mt-6 text-lg leading-8 text-slate-600 sm:text-xl">
-            WireMart turns residential electrical planning into a clean,
-            quote-ready workflow with IS 732:2019-aligned BOMs, dealer
-            visibility, and project tracking built for confidence.
+          <p className="animate-fade-in-up delay-200 mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-600">
+            Generate engineer-grade electrical BOMs and source competing
+            wholesale quotes from verified local dealers.
           </p>
 
-          <GmvTicker />
+          <p className="animate-fade-in-up delay-200 mx-auto mt-4 max-w-2xl text-base leading-7 text-slate-500">
+            Coil counts, wire gauges, conduit runs, MCB schedule and connected
+            load — the same numbers your electrician works from, so you can
+            check a quote instead of taking it on trust.
+          </p>
         </div>
 
         {isLoggedIn ? (

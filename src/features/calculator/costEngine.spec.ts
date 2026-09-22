@@ -267,3 +267,58 @@ run("deterministic totals are additive", () => {
   assert.equal(priced.pricing.materialCost, 50 * 28 + 4 * 180);
   assert.equal(priced.pricing.totalEstimate, priced.pricing.materialCost + priced.pricing.laborCost);
 });
+
+run("estimate range is derived from cable spend, not a flat multiplier", () => {
+  // 50 m of 2.5 sq mm @ 28 = 1400 cable; 4 × 5A socket @ 180 = 720 non-cable.
+  const items: BOMItem[] = [
+    {
+      category: "WIRE",
+      pricingCode: "WIRE_2_5",
+      wireGauge: "2.5",
+      sizeSqMm: 2.5,
+      description: "2.5 wire",
+      totalMeters: 50,
+      purchasableMeters: 90,
+      surplusMeters: 40,
+      coilsRequired: 1,
+      coilLengthMeters: 90,
+    },
+    {
+      category: "SWITCHGEAR",
+      pricingCode: "SOCKET_5A_2M",
+      itemType: "SOCKET_5A",
+      quantity: 4,
+      description: "5A socket",
+    },
+  ];
+
+  const priced: EnrichedBOMResult = applyPricing(makeResult(items));
+  const cable = 50 * 28;
+
+  assert.equal(priced.pricing.cableCost, cable);
+  assert.equal(priced.pricing.cableSharePct, cable / priced.pricing.materialCost);
+
+  // Low bound is the base total; the uplift touches cable only.
+  assert.equal(priced.pricing.lowEstimate, priced.pricing.totalEstimate);
+  assert.equal(priced.pricing.highEstimate, priced.pricing.totalEstimate + cable * 0.3);
+  assert.ok(priced.pricing.highEstimate > priced.pricing.lowEstimate);
+});
+
+run("a BOM with no cable has a zero-width estimate range", () => {
+  // Switchgear only: nothing here moves with copper or wire grade, so the
+  // range must collapse rather than inflate by a blanket percentage.
+  const items: BOMItem[] = [
+    {
+      category: "SWITCHGEAR",
+      pricingCode: "SOCKET_5A_2M",
+      itemType: "SOCKET_5A",
+      quantity: 10,
+      description: "5A socket",
+    },
+  ];
+
+  const priced: EnrichedBOMResult = applyPricing(makeResult(items));
+  assert.equal(priced.pricing.cableCost, 0);
+  assert.equal(priced.pricing.cableSharePct, 0);
+  assert.equal(priced.pricing.highEstimate, priced.pricing.lowEstimate);
+});
