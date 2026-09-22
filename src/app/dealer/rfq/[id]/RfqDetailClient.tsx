@@ -1,5 +1,25 @@
 "use client";
 
+// src/app/dealer/rfq/[id]/RfqDetailClient.tsx
+// ============================================================================
+// MATERIAL REQUISITION
+// ============================================================================
+// This is the screen where a distributor decides whether VoltFlow is a real
+// tool or a toy, so it is laid out as an incoming requisition sheet rather
+// than a notification: a ruled header block carrying the reference and the
+// deadline, then three schedules in the order a job is actually priced —
+// cable, conduit, distribution — then the bid form.
+//
+// Cable is stated in coils, not metres. "487 m of 2.5 sq mm" is not something
+// anyone sells over a counter; "6 × 90 m coils" is a line a dealer can quote
+// against and pull from stock.
+//
+// Per-line platform pricing is deliberately absent. A requisition asks a
+// vendor to price the work; it does not tell them what the buyer thinks each
+// line is worth. The aggregate platform estimate stays as one clearly labelled
+// reference figure so the dealer knows the order of magnitude expected.
+// ============================================================================
+
 import Link from "next/link";
 import { FormEvent, useState, useTransition } from "react";
 import { submitQuoteAction } from "@/features/quotes/actions";
@@ -9,42 +29,51 @@ import {
   wireGradeShort,
   type WireGrade,
 } from "@/features/quotes/wireGrade";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  Field,
+  Metric,
+  Row,
+  Section,
+  SpecTable,
+  StatusChip,
+  statusTone,
+} from "@/components/spec-sheet";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface BomSnapshot {
+export interface BomSnapshot {
   totalConnectedLoadKw: number;
   maxDemandKw: number;
   totalCircuits: number;
-  pricing: {
-    materialCost: number;
-  };
-  phaseDecision: {
-    finalRecommendation: string;
-  };
-  items: Array<{
+  materialCost: number;
+  phase: string;
+  cable: Array<{
     category: string;
-    pricingCode: string;
     description: string;
-    qty: number;
-    unit: string;
-    unitPrice?: number;
-    lineTotal?: number;
+    sizeSqMm: number | null;
+    purpose: string;
+    totalMeters: number;
+    purchasableMeters: number;
+    surplusMeters: number;
+    coilsRequired: number;
+    coilLengthMeters: number;
+  }>;
+  conduit: Array<{
+    description: string;
+    sizeMm: string;
+    totalMeters: number;
+  }>;
+  distribution: Array<{
+    category: string;
+    description: string;
+    quantity: number;
+    ratingAmps: number | null;
   }>;
   warnings: string[];
 }
@@ -54,7 +83,11 @@ interface Props {
   rfqStatus: string;
   projectName: string;
   createdAt: string;
+  expiresAt: string | null;
   visibilityCity: string;
+  bidCount: number;
+  maxQuotes: number;
+  isApproved: boolean;
   bom: BomSnapshot | null;
   fallbackEstimate: number | null;
   existingQuote: {
@@ -62,6 +95,8 @@ interface Props {
     totalPrice: number;
     brandOffered: string;
     wireGrade: string | null;
+    deliveryDays: number | null;
+    validUntil: string | null;
     status: string;
   } | null;
 }
@@ -84,6 +119,22 @@ function formatDate(iso: string): string {
   );
 }
 
+function formatDateTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(iso));
+}
+
+function gauge(sizeSqMm: number | null): string {
+  return sizeSqMm != null ? `${sizeSqMm.toFixed(1)} mm²` : "—";
+}
+
+/** Short, stable reference a dealer can quote back over the phone. */
+function requisitionRef(rfqId: string): string {
+  return `VF-${rfqId.slice(-8).toUpperCase()}`;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -93,27 +144,34 @@ export function RfqDetailClient({
   rfqStatus,
   projectName,
   createdAt,
+  expiresAt,
   visibilityCity,
+  bidCount,
+  maxQuotes,
+  isApproved,
   bom,
   fallbackEstimate,
   existingQuote,
 }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(!!existingQuote);
+  const [submitted, setSubmitted] = useState(false);
 
   const [totalPrice, setTotalPrice] = useState("");
   const [brandOffered, setBrandOffered] = useState("");
-  // Defaults to FR, the standard residential grade in NCR. A required field
-  // with no default would make every dealer pick the same value anyway; a
-  // default that is not the common case would quietly corrupt the comparison.
   const [wireGrade, setWireGrade] = useState<WireGrade>("FR");
   const [deliveryDays, setDeliveryDays] = useState("");
   const [details, setDetails] = useState("");
 
-  const estimate = bom?.pricing.materialCost ?? fallbackEstimate;
+  const estimate = bom?.materialCost ?? fallbackEstimate;
   const isOpen = rfqStatus === "OPEN";
-  const canSubmit = isOpen && !existingQuote;
+  const canSubmit = isOpen && !existingQuote && isApproved;
+
+  const totalCoils = bom?.cable.reduce((sum, c) => sum + c.coilsRequired, 0) ?? 0;
+  const totalConduitM =
+    bom?.conduit.reduce((sum, c) => sum + c.totalMeters, 0) ?? 0;
+  const totalPieces =
+    bom?.distribution.reduce((sum, d) => sum + d.quantity, 0) ?? 0;
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -146,338 +204,384 @@ export function RfqDetailClient({
   }
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-4xl px-4 py-14 sm:px-6">
-      {/* Header */}
-      <div className="mb-2">
+    <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-10 sm:px-6">
+      <div className="mb-3">
         <Link
           href="/dealer/dashboard"
-          className="text-sm text-muted-foreground hover:underline"
+          className="text-[13px] text-slate-500 underline-offset-4 hover:text-slate-900 hover:underline"
         >
-          &larr; Back to Dashboard
+          &larr; Dealer Dashboard
         </Link>
       </div>
-      <div className="mb-8 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{projectName}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {formatDate(createdAt)} &middot; {visibilityCity}
-          </p>
+
+      {/* ── Requisition masthead ─────────────────────────────────────────── */}
+      <div className="border border-slate-300 bg-white">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-300 bg-slate-50 px-3 py-2.5">
+          <div>
+            <p className="spec-label">Material Requisition</p>
+            <h1 className="mt-1 text-lg font-bold leading-tight tracking-tight text-slate-950">
+              {projectName}
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusChip status={rfqStatus} tone={statusTone(rfqStatus)} />
+            <span className="spec-num border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+              {requisitionRef(rfqId)}
+            </span>
+          </div>
         </div>
-        <Badge
-          variant={
-            rfqStatus === "OPEN"
-              ? "default"
-              : rfqStatus === "CLOSED"
-                ? "outline"
-                : "secondary"
-          }
-        >
-          {rfqStatus}
-        </Badge>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4">
+          <Field label="Delivery Area" value={visibilityCity} />
+          <Field label="Issued" value={formatDate(createdAt)} mono />
+          <Field
+            label="Bids Close"
+            value={expiresAt ? formatDateTime(expiresAt) : "No deadline"}
+            mono
+          />
+          <Field
+            label="Bids Received"
+            value={`${bidCount} of ${maxQuotes}`}
+            mono
+          />
+        </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-5">
-        {/* BOM Breakdown — left 3 cols */}
-        <div className="space-y-6 lg:col-span-3">
-          {/* Summary stats */}
-          {bom && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Project Summary</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Connected Load</p>
-                    <p className="font-semibold tabular-nums">
-                      {bom.totalConnectedLoadKw.toFixed(2)} kW
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Max Demand</p>
-                    <p className="font-semibold tabular-nums">
-                      {bom.maxDemandKw.toFixed(2)} kW
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Phase</p>
-                    <p className="font-semibold">
-                      {bom.phaseDecision.finalRecommendation === "THREE"
-                        ? "3-Phase"
-                        : "Single Phase"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Circuits</p>
-                    <p className="font-semibold tabular-nums">
-                      {bom.totalCircuits}
-                    </p>
-                  </div>
+      {!isApproved && (
+        <p className="mt-4 border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
+          Your dealer profile is not yet approved, so this requisition is
+          read-only. An admin has to clear the account before you can bid.
+        </p>
+      )}
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-5 lg:items-start">
+        {/* ── Schedules ──────────────────────────────────────────────────── */}
+        <div className="space-y-4 lg:col-span-3">
+          {bom ? (
+            <>
+              <Section
+                index={1}
+                title="Load Parameters"
+                meta="Diversified per IS 732"
+              >
+                <div className="grid grid-cols-2 divide-y divide-slate-200 sm:grid-cols-4 sm:divide-y-0">
+                  <Metric
+                    label="Connected Load"
+                    value={`${bom.totalConnectedLoadKw.toFixed(2)} kW`}
+                  />
+                  <Metric
+                    label="Max Demand"
+                    value={`${bom.maxDemandKw.toFixed(2)} kW`}
+                  />
+                  <Metric
+                    label="Supply"
+                    value={bom.phase === "THREE" ? "3-Phase" : "1-Phase"}
+                  />
+                  <Metric label="Circuits" value={String(bom.totalCircuits)} />
                 </div>
+              </Section>
 
-                <Separator className="my-4" />
+              {bom.cable.length > 0 && (
+                <Section
+                  index={2}
+                  title="Cable Schedule"
+                  meta={`${totalCoils} coils total`}
+                >
+                  <SpecTable
+                    minWidth={560}
+                    head={[
+                      "Gauge",
+                      "Purpose",
+                      "Required",
+                      "Supply As",
+                      "Surplus",
+                    ]}
+                  >
+                    {bom.cable.map((line, i) => (
+                      <Row key={`${line.description}-${i}`}>
+                        <td className="spec-num px-3 py-2.5 font-medium text-slate-900">
+                          {gauge(line.sizeSqMm)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-slate-600">
+                          {line.purpose}
+                        </td>
+                        <td className="spec-num px-3 py-2.5 text-right text-slate-600">
+                          {line.totalMeters.toFixed(1)} m
+                        </td>
+                        <td className="spec-num px-3 py-2.5 text-right font-semibold text-slate-900">
+                          {line.coilsRequired > 0
+                            ? `${line.coilsRequired} × ${line.coilLengthMeters} m`
+                            : `${line.purchasableMeters.toFixed(1)} m`}
+                        </td>
+                        <td className="spec-num px-3 py-2.5 text-right text-slate-400">
+                          {line.surplusMeters > 0
+                            ? `+${line.surplusMeters.toFixed(1)} m`
+                            : "—"}
+                        </td>
+                      </Row>
+                    ))}
+                  </SpecTable>
+                </Section>
+              )}
 
-                <div className="grid grid-cols-1 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Platform Material Estimate</p>
-                    <p className="text-lg font-semibold tabular-nums text-primary">
-                      {formatCurrency(bom.pricing.materialCost)}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+              {bom.conduit.length > 0 && (
+                <Section
+                  index={3}
+                  title="Conduit Runs"
+                  meta={`${totalConduitM.toFixed(0)} m total`}
+                >
+                  <SpecTable minWidth={420} head={["Size", "Description", "Length"]}>
+                    {bom.conduit.map((line, i) => (
+                      <Row key={`${line.description}-${i}`}>
+                        <td className="spec-num px-3 py-2.5 font-medium text-slate-900">
+                          {line.sizeMm}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-slate-600">
+                          {line.description}
+                        </td>
+                        <td className="spec-num px-3 py-2.5 text-right text-slate-900">
+                          {line.totalMeters.toFixed(1)} m
+                        </td>
+                      </Row>
+                    ))}
+                  </SpecTable>
+                </Section>
+              )}
 
-          {/* BOM Items table */}
-          {bom && bom.items.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Bill of Materials</CardTitle>
-                <CardDescription>
-                  {bom.items.length} line items
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-xs text-muted-foreground">
-                        <th className="pb-2 pr-4">Item</th>
-                        <th className="pb-2 pr-4 text-right">Qty</th>
-                        <th className="pb-2 pr-4">Unit</th>
-                        {bom.items.some((i) => i.unitPrice != null) && (
-                          <th className="pb-2 text-right">Line Total</th>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bom.items.map((item, idx) => (
-                        <tr key={idx} className="border-b last:border-0">
-                          <td className="py-2 pr-4">{item.description}</td>
-                          <td className="py-2 pr-4 text-right tabular-nums">
-                            {item.unit === "m"
-                              ? item.qty.toFixed(1)
-                              : item.qty}
-                          </td>
-                          <td className="py-2 pr-4">{item.unit}</td>
-                          {bom.items.some((i) => i.unitPrice != null) && (
-                            <td className="py-2 text-right tabular-nums">
-                              {item.lineTotal != null
-                                ? formatCurrency(item.lineTotal)
-                                : "—"}
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+              {bom.distribution.length > 0 && (
+                <Section
+                  index={4}
+                  title="Distribution & Accessories"
+                  meta={`${totalPieces} pcs`}
+                >
+                  <SpecTable minWidth={420} head={["Item", "Type", "Qty"]}>
+                    {bom.distribution.map((line, i) => (
+                      <Row key={`${line.description}-${i}`}>
+                        <td className="px-3 py-2.5 text-slate-900">
+                          {line.description}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-[11px] uppercase tracking-[0.08em] text-slate-400">
+                          {line.category}
+                        </td>
+                        <td className="spec-num px-3 py-2.5 text-right font-semibold text-slate-900">
+                          {line.quantity}
+                        </td>
+                      </Row>
+                    ))}
+                  </SpecTable>
+                </Section>
+              )}
 
-          {/* Warnings */}
-          {bom && bom.warnings.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Warnings</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                  {bom.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* No BOM fallback */}
-          {!bom && (
-            <Card className="py-12 text-center">
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Detailed BOM breakdown is not available for this project.
+              {bom.warnings.length > 0 && (
+                <Section index={5} title="Notes from the Engine">
+                  <ul className="divide-y divide-slate-100">
+                    {bom.warnings.map((w, i) => (
+                      <li
+                        key={i}
+                        className="px-3 py-2 text-[13px] leading-relaxed text-slate-600"
+                      >
+                        {w}
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              )}
+            </>
+          ) : (
+            <div className="border border-slate-200 bg-white px-3 py-10 text-center">
+              <p className="text-[13px] text-slate-500">
+                No itemised schedule is available for this requisition.
+              </p>
+              {estimate != null && (
+                <p className="spec-num mt-2 text-lg font-semibold text-slate-900">
+                  {formatCurrency(estimate)}
                 </p>
-                {estimate != null && (
-                  <p className="mt-2 text-lg font-semibold">
-                    Platform Estimate: {formatCurrency(estimate)}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Quote Form — right 2 cols */}
+        {/* ── Bid form ───────────────────────────────────────────────────── */}
         <div className="lg:col-span-2">
-          <Card className="sticky top-20">
-            <CardHeader>
-              <CardTitle className="text-base">
-                {existingQuote ? "Your Quote" : "Submit Your Quote"}
-              </CardTitle>
-              {!canSubmit && !existingQuote && (
-                <CardDescription>
-                  This quote request is no longer accepting submissions.
-                </CardDescription>
+          <div className="sticky top-20 border border-slate-300 bg-white">
+            <header className="flex items-baseline justify-between gap-2 border-b border-slate-300 bg-slate-50 px-3 py-2">
+              <span className="text-[13px] font-semibold uppercase tracking-[0.08em] text-slate-900">
+                {existingQuote ? "Your Bid" : "Submit Bid"}
+              </span>
+              {estimate != null && (
+                <span className="spec-label">
+                  Ref. est. {formatCurrency(estimate)}
+                </span>
               )}
-            </CardHeader>
-            <CardContent>
-              {existingQuote ? (
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Your Price</span>
-                    <span className="font-semibold tabular-nums">
-                      {formatCurrency(existingQuote.totalPrice)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Brand</span>
-                    <span>{existingQuote.brandOffered}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Wire Grade</span>
-                    <span>
-                      {wireGradeShort(existingQuote.wireGrade) ?? "Not specified"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Status</span>
-                    <Badge
-                      variant={
-                        existingQuote.status === "ACCEPTED"
-                          ? "default"
-                          : existingQuote.status === "REJECTED"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                    >
-                      {existingQuote.status}
-                    </Badge>
-                  </div>
-                  {submitted && !existingQuote.id && (
-                    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                      Quote submitted successfully!
-                    </p>
-                  )}
+            </header>
+
+            {existingQuote ? (
+              <>
+                <div className="grid grid-cols-2">
+                  <Field
+                    label="Your Price"
+                    value={formatCurrency(existingQuote.totalPrice)}
+                    mono
+                  />
+                  <Field label="Brand" value={existingQuote.brandOffered} />
+                  <Field
+                    label="Wire Grade"
+                    value={wireGradeShort(existingQuote.wireGrade) ?? "Not stated"}
+                    mono
+                  />
+                  <Field
+                    label="Delivery"
+                    value={
+                      existingQuote.deliveryDays != null
+                        ? `${existingQuote.deliveryDays} days`
+                        : "Not stated"
+                    }
+                    mono
+                  />
+                  <Field
+                    label="Valid Until"
+                    value={
+                      existingQuote.validUntil
+                        ? formatDate(existingQuote.validUntil)
+                        : "—"
+                    }
+                    mono
+                  />
+                  <Field
+                    label="Status"
+                    value={
+                      <StatusChip
+                        status={existingQuote.status}
+                        tone={statusTone(existingQuote.status)}
+                      />
+                    }
+                  />
                 </div>
-              ) : canSubmit ? (
-                <form className="space-y-4" onSubmit={onSubmit}>
-                  {error && (
-                    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                      {error}
-                    </p>
-                  )}
-                  {submitted && (
-                    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                      Quote submitted successfully!
-                    </p>
-                  )}
+                {submitted && (
+                  <p className="border-t border-emerald-300 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">
+                    Bid submitted. The buyer has been notified.
+                  </p>
+                )}
+              </>
+            ) : canSubmit ? (
+              <form className="space-y-3 p-3" onSubmit={onSubmit}>
+                {error && (
+                  <p className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+                    {error}
+                  </p>
+                )}
+                {submitted && (
+                  <p className="border border-emerald-300 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">
+                    Bid submitted. The buyer has been notified.
+                  </p>
+                )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="totalPrice">Your Total Price (INR)</Label>
-                    <Input
-                      id="totalPrice"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={totalPrice}
-                      onChange={(e) => setTotalPrice(e.target.value)}
-                      placeholder={
-                        estimate != null ? `Platform est: ${estimate}` : ""
-                      }
-                      required
-                      disabled={submitted}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="totalPrice" className="spec-label">
+                    Total Price (INR, ex-GST)
+                  </Label>
+                  <Input
+                    id="totalPrice"
+                    type="number"
+                    min="1"
+                    step="1"
+                    className="spec-num h-9"
+                    value={totalPrice}
+                    onChange={(e) => setTotalPrice(e.target.value)}
+                    placeholder={estimate != null ? String(estimate) : ""}
+                    required
+                    disabled={submitted}
+                  />
+                </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="brandOffered">Brand Offered</Label>
-                    <Input
-                      id="brandOffered"
-                      value={brandOffered}
-                      onChange={(e) => setBrandOffered(e.target.value)}
-                      placeholder="e.g. Polycab FR"
-                      required
-                      disabled={submitted}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="brandOffered" className="spec-label">
+                    Brand Offered
+                  </Label>
+                  <Input
+                    id="brandOffered"
+                    className="h-9"
+                    value={brandOffered}
+                    onChange={(e) => setBrandOffered(e.target.value)}
+                    placeholder="Polycab"
+                    required
+                    disabled={submitted}
+                  />
+                </div>
 
-                  {/* Native select, not the popover component: a dealer fills
-                      this on a phone in a shop, and the OS picker beats a
-                      custom dropdown there. Styled to match Input. */}
-                  <div className="space-y-2">
-                    <Label htmlFor="wireGrade">Wire Grade</Label>
-                    <select
-                      id="wireGrade"
-                      value={wireGrade}
-                      onChange={(e) => setWireGrade(e.target.value as WireGrade)}
-                      disabled={submitted}
-                      className="border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                    >
-                      {WIRE_GRADES.map((grade) => (
-                        <option key={grade} value={grade}>
-                          {WIRE_GRADE_META[grade].label}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-muted-foreground">
-                      The buyer compares grades side by side — quoting a higher
-                      grade explains a higher price.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="deliveryDays">
-                      Delivery Days{" "}
-                      <span className="text-xs text-muted-foreground">
-                        (optional)
-                      </span>
-                    </Label>
-                    <Input
-                      id="deliveryDays"
-                      type="number"
-                      min="1"
-                      max="365"
-                      value={deliveryDays}
-                      onChange={(e) => setDeliveryDays(e.target.value)}
-                      disabled={submitted}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="details">
-                      Additional Details{" "}
-                      <span className="text-xs text-muted-foreground">
-                        (optional)
-                      </span>
-                    </Label>
-                    <Textarea
-                      id="details"
-                      value={details}
-                      onChange={(e) => setDetails(e.target.value)}
-                      rows={3}
-                      maxLength={5000}
-                      disabled={submitted}
-                    />
-                  </div>
-
-                  <Button
-                    className="w-full"
-                    type="submit"
-                    disabled={isPending || submitted}
+                {/* Native select, not the popover component: a dealer fills
+                    this on a phone in a shop, where the OS picker wins. */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="wireGrade" className="spec-label">
+                    Wire Grade
+                  </Label>
+                  <select
+                    id="wireGrade"
+                    value={wireGrade}
+                    onChange={(e) => setWireGrade(e.target.value as WireGrade)}
+                    disabled={submitted}
+                    className="border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-[13px] outline-none transition-[color,box-shadow] focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isPending ? "Submitting..." : "Submit Quote"}
-                  </Button>
-                </form>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  This RFQ is {rfqStatus.toLowerCase()}.
+                    {WIRE_GRADES.map((grade) => (
+                      <option key={grade} value={grade}>
+                        {WIRE_GRADE_META[grade].label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="deliveryDays" className="spec-label">
+                    Delivery (days, optional)
+                  </Label>
+                  <Input
+                    id="deliveryDays"
+                    type="number"
+                    min="1"
+                    max="365"
+                    className="spec-num h-9"
+                    value={deliveryDays}
+                    onChange={(e) => setDeliveryDays(e.target.value)}
+                    disabled={submitted}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="details" className="spec-label">
+                    Notes (optional)
+                  </Label>
+                  <Textarea
+                    id="details"
+                    className="text-[13px]"
+                    value={details}
+                    onChange={(e) => setDetails(e.target.value)}
+                    rows={3}
+                    maxLength={5000}
+                    disabled={submitted}
+                  />
+                </div>
+
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  Your price is held for 7 days from submission. The buyer sees
+                  it alongside competing bids with your brand and grade.
                 </p>
-              )}
-            </CardContent>
-          </Card>
+
+                <Button
+                  className="h-9 w-full"
+                  type="submit"
+                  disabled={isPending || submitted}
+                >
+                  {isPending ? "Submitting…" : "Submit Bid"}
+                </Button>
+              </form>
+            ) : (
+              <p className="px-3 py-6 text-center text-[13px] text-slate-500">
+                {!isApproved
+                  ? "Profile approval required to bid."
+                  : `This requisition is ${rfqStatus.toLowerCase()} and is not accepting bids.`}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </main>

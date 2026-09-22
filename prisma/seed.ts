@@ -24,14 +24,45 @@
 // Remove them by hand once you have confirmed you do not need their data.
 // ============================================================================
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { hash } from "bcryptjs";
 import {
   quoteValidUntilFrom,
   rfqExpiryFrom,
 } from "../src/features/quotes/validity";
+import { calculateBOM } from "../src/features/calculator/calculateBOM";
+import { applyPricing } from "../src/features/calculator/costEngine";
+import { buildCalculatorInput } from "../src/features/calculator/generateRoomSpecs";
+import type { LayoutInput } from "../src/features/calculator/layoutTypes";
 
 const prisma = new PrismaClient();
+
+/**
+ * Runs the real engine rather than writing a stub.
+ *
+ * A hand-written bomData blob has no items array, so the dealer's requisition
+ * sheet falls through to "no itemised schedule" and the cable and conduit
+ * tables never render — which means the seed cannot be used to test the screen
+ * it exists to test. The calculator is pure (no server-only imports, no
+ * database), so the seed can just call it.
+ */
+function buildBom(layout: LayoutInput) {
+  const bom = calculateBOM(buildCalculatorInput(layout));
+  return applyPricing(bom);
+}
+
+/** EnrichedBOMResult -> a Prisma JSON column. */
+function asJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function formatINR(amount: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
 
 async function main() {
   const pw = await hash("password123", 12);
@@ -131,25 +162,36 @@ async function main() {
     },
   });
 
-  // ── A project with an open RFQ and two competing quotes ─────────────────
+  // ── Project A: an open RFQ that already has two competing bids ──────────
+  // This is the buyer's comparison-matrix fixture.
+
+  const layoutA: LayoutInput = {
+    propertyType: "FLAT",
+    city: "NCR",
+    bedrooms: 2,
+    bathrooms: 2,
+    balconies: 1,
+    totalFloors: 1,
+    approxSqFt: 1050,
+    modularKitchen: true,
+    acInBedrooms: true,
+    acInLivingRoom: false,
+    geyserInBathrooms: true,
+  };
+  const bomA = buildBom(layoutA);
 
   const project = await prisma.project.upsert({
     where: { id: "seed-project-001" },
-    update: {},
+    update: { bomData: asJson(bomA), totalEstimate: bomA.pricing.materialCost },
     create: {
       id: "seed-project-001",
       ownerId: homeowner.id,
       projectName: "2BHK Noida Sector 62",
       projectType: "RESIDENTIAL",
       status: "RFQ_SUBMITTED",
-      inputData: { source: "SEED" },
-      bomData: {
-        source: "SEED",
-        pricing: { materialCost: 45000 },
-        totalConnectedLoadKw: 4.8,
-        maxDemandKw: 3.36,
-      },
-      totalEstimate: 45000,
+      inputData: { source: "SEED", layout: asJson(layoutA) },
+      bomData: asJson(bomA),
+      totalEstimate: bomA.pricing.materialCost,
     },
   });
 
@@ -202,6 +244,56 @@ async function main() {
     },
   });
 
+  // ── Project B: an open RFQ nobody has bid on ────────────────────────────
+  //
+  // The dealer board excludes requests you have already quoted, so with only
+  // Project A seeded the approved dealer opened an empty board and had nothing
+  // to bid on — the one path the click-test most needs. This is a live
+  // requisition, three-phase and larger, waiting for a first bid.
+
+  const layoutB: LayoutInput = {
+    propertyType: "DUPLEX",
+    city: "NCR",
+    bedrooms: 4,
+    bathrooms: 4,
+    balconies: 2,
+    totalFloors: 2,
+    approxSqFt: 2400,
+    modularKitchen: true,
+    acInBedrooms: true,
+    acInLivingRoom: true,
+    geyserInBathrooms: true,
+  };
+  const bomB = buildBom(layoutB);
+
+  const projectB = await prisma.project.upsert({
+    where: { id: "seed-project-002" },
+    update: { bomData: asJson(bomB), totalEstimate: bomB.pricing.materialCost },
+    create: {
+      id: "seed-project-002",
+      ownerId: homeowner.id,
+      projectName: "4BHK Duplex — Gurugram Sector 57",
+      projectType: "RESIDENTIAL",
+      status: "RFQ_SUBMITTED",
+      inputData: { source: "SEED", layout: asJson(layoutB) },
+      bomData: asJson(bomB),
+      totalEstimate: bomB.pricing.materialCost,
+    },
+  });
+
+  await prisma.quoteRequest.upsert({
+    where: { projectId: projectB.id },
+    update: { status: "OPEN", expiresAt: rfqExpiryFrom(now) },
+    create: {
+      projectId: projectB.id,
+      status: "OPEN",
+      visibilityCity: "NCR",
+      maxQuotes: 5,
+      quoteCount: 0,
+      expiresAt: rfqExpiryFrom(now),
+    },
+  });
+
   // ── PriceIndex — effective dealer rates per metre of copper wire ────────
   //
   // Until this table has rows, loadRateCardFromDb() silently falls back to the
@@ -249,10 +341,17 @@ VoltFlow seed complete.
     dealer@voltflow.in     DEALER     APPROVED  — Singh Electricals & Cables
     dealer2@voltflow.in    DEALER     PENDING   — Gupta Wire House
 
-  Project   seed-project-001  "2BHK Noida Sector 62"
-  RFQ       OPEN, expires ${rfqExpiryFrom(now).toLocaleString("en-IN")}
-  Quotes    2 SUBMITTED, valid until ${quoteValidUntilFrom(now).toLocaleDateString("en-IN")}
-  Rates     ${wireRates.length} PriceIndex rows
+  Project A  seed-project-001  "2BHK Noida Sector 62"
+             ${formatINR(bomA.pricing.materialCost)} · ${bomA.totalConnectedLoadKw.toFixed(2)} kW · ${bomA.items.length} BOM lines
+             RFQ OPEN with 2 bids — the buyer's comparison fixture
+
+  Project B  seed-project-002  "4BHK Duplex — Gurugram Sector 57"
+             ${formatINR(bomB.pricing.materialCost)} · ${bomB.totalConnectedLoadKw.toFixed(2)} kW · ${bomB.items.length} BOM lines
+             RFQ OPEN with 0 bids — open this one as the dealer and bid
+
+  Both RFQs close ${rfqExpiryFrom(now).toLocaleString("en-IN")}
+  Bids valid until ${quoteValidUntilFrom(now).toLocaleDateString("en-IN")}
+  Rates      ${wireRates.length} PriceIndex rows
 `);
 }
 

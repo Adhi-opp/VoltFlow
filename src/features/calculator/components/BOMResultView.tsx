@@ -27,6 +27,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Metric, Row, Section, SpecTable } from "@/components/spec-sheet";
 import type { EnrichedBOMResult } from "../costEngine";
 import type { BOMItem } from "../type";
 
@@ -57,100 +58,6 @@ function gaugeLabel(sizeSqMm: number): string {
 function purposeOf(description: string): string {
   const match = description.match(/\(([^)]+)\)\s*$/);
   return match ? match[1] : "—";
-}
-
-// ---------------------------------------------------------------------------
-// Layout primitives
-// ---------------------------------------------------------------------------
-
-function Section({
-  index,
-  title,
-  meta,
-  children,
-}: {
-  index: number;
-  title: string;
-  meta?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="border border-slate-200 bg-white">
-      <header className="flex items-baseline justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-        <h3 className="flex items-baseline gap-2">
-          <span className="spec-num text-[11px] text-slate-400">
-            {String(index).padStart(2, "0")}
-          </span>
-          <span className="text-[13px] font-semibold uppercase tracking-[0.08em] text-slate-900">
-            {title}
-          </span>
-        </h3>
-        {meta && <span className="spec-label">{meta}</span>}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="border-r border-slate-200 px-3 py-2.5 last:border-r-0">
-      <p className="spec-label">{label}</p>
-      <p
-        className={`spec-num mt-1 text-lg font-semibold leading-tight ${
-          accent ? "text-emerald-700" : "text-slate-900"
-        }`}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function SpecTable({
-  head,
-  children,
-}: {
-  head: string[];
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[520px] text-[13px]">
-        <thead>
-          <tr className="border-b border-slate-200 bg-white">
-            {head.map((h, i) => (
-              <th
-                key={h}
-                className={`spec-label whitespace-nowrap px-3 py-2 font-medium ${
-                  i === 0 ? "text-left" : "text-right"
-                }`}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  );
-}
-
-function Row({ children }: { children: React.ReactNode }) {
-  return (
-    <tr className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/70">
-      {children}
-    </tr>
-  );
 }
 
 // ---------------------------------------------------------------------------

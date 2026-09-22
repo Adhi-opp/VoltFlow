@@ -2,102 +2,120 @@ import { redirect, notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { RfqDetailClient } from "./RfqDetailClient";
+import { effectiveRfqStatus } from "@/features/quotes/validity";
+import { RfqDetailClient, type BomSnapshot } from "./RfqDetailClient";
 
 export const metadata: Metadata = {
   title: "Quote Request — VoltFlow",
 };
 
 // ---------------------------------------------------------------------------
-// bomData helpers
+// bomData → requisition snapshot
 // ---------------------------------------------------------------------------
-
-interface BomSnapshot {
-  totalConnectedLoadKw: number;
-  maxDemandKw: number;
-  totalCircuits: number;
-  pricing: {
-    materialCost: number;
-  };
-  phaseDecision: {
-    finalRecommendation: string;
-  };
-  items: Array<{
-    category: string;
-    pricingCode: string;
-    description: string;
-    qty: number;
-    unit: string;
-    unitPrice?: number;
-    lineTotal?: number;
-  }>;
-  warnings: string[];
-}
+// The previous parser flattened every line into {description, qty, unit} and
+// threw away coilsRequired, coilLengthMeters, surplusMeters and the gauge. A
+// dealer pricing cable needs the coil count — "487 m of 2.5 sq mm" is not
+// something anyone stocks or sells, "6 × 90 m coils" is. So the schedules are
+// preserved separately here rather than mashed into one item list.
+// ---------------------------------------------------------------------------
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function parseBomSnapshot(raw: unknown): BomSnapshot | null {
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** "1.5 sq mm FR PVC Copper Wire (Lighting)" -> "Lighting" */
+function purposeOf(description: string): string {
+  const match = description.match(/\(([^)]+)\)\s*$/);
+  return match ? match[1] : "General";
+}
+
+export function parseBomSnapshot(raw: unknown): BomSnapshot | null {
   if (!isRecord(raw)) return null;
+
   const pricing = raw.pricing;
   if (!isRecord(pricing)) return null;
-  if (typeof pricing.materialCost !== "number") return null;
-  if (
-    typeof raw.totalConnectedLoadKw !== "number" ||
-    typeof raw.maxDemandKw !== "number" ||
-    typeof raw.totalCircuits !== "number"
-  )
+
+  const materialCost = num(pricing.materialCost);
+  const totalConnectedLoadKw = num(raw.totalConnectedLoadKw);
+  const maxDemandKw = num(raw.maxDemandKw);
+  const totalCircuits = num(raw.totalCircuits);
+
+  if (materialCost == null || totalConnectedLoadKw == null || maxDemandKw == null) {
     return null;
+  }
 
   const phaseDecision = raw.phaseDecision;
-  if (!isRecord(phaseDecision) || typeof phaseDecision.finalRecommendation !== "string")
-    return null;
-
-  const METER_CATEGORIES = new Set(["WIRE", "EARTH_WIRE", "CONDUIT"]);
+  const phase =
+    isRecord(phaseDecision) && typeof phaseDecision.finalRecommendation === "string"
+      ? phaseDecision.finalRecommendation
+      : "SINGLE";
 
   const items = Array.isArray(raw.items)
-    ? (raw.items as Array<Record<string, unknown>>).map((item) => {
-        const category = String(item.category ?? "");
-        const isMeter = METER_CATEGORIES.has(category);
-        const qty = isMeter
-          ? (typeof item.totalMeters === "number" ? item.totalMeters : 0)
-          : (typeof item.quantity === "number" ? item.quantity : 0);
-        const unit = isMeter ? "m" : "pcs";
-
-        return {
-          category,
-          pricingCode: String(item.pricingCode ?? ""),
-          description: String(item.description ?? ""),
-          qty,
-          unit,
-          unitPrice: typeof item.estimatedCostPerMeter === "number"
-            ? item.estimatedCostPerMeter
-            : typeof item.estimatedCostPerUnit === "number"
-              ? item.estimatedCostPerUnit
-              : undefined,
-          lineTotal: typeof item.estimatedTotalCost === "number"
-            ? item.estimatedTotalCost
-            : undefined,
-        };
-      })
+    ? (raw.items as unknown[]).filter(isRecord)
     : [];
+
+  const cable: BomSnapshot["cable"] = [];
+  const conduit: BomSnapshot["conduit"] = [];
+  const distribution: BomSnapshot["distribution"] = [];
+
+  for (const item of items) {
+    const category = String(item.category ?? "");
+    const description = String(item.description ?? "");
+
+    if (category === "WIRE" || category === "EARTH_WIRE") {
+      cable.push({
+        category,
+        description,
+        sizeSqMm: num(item.sizeSqMm),
+        purpose: category === "EARTH_WIRE" ? "Earthing" : purposeOf(description),
+        totalMeters: num(item.totalMeters) ?? 0,
+        purchasableMeters: num(item.purchasableMeters) ?? 0,
+        surplusMeters: num(item.surplusMeters) ?? 0,
+        coilsRequired: num(item.coilsRequired) ?? 0,
+        coilLengthMeters: num(item.coilLengthMeters) ?? 0,
+      });
+      continue;
+    }
+
+    if (category === "CONDUIT") {
+      conduit.push({
+        description,
+        sizeMm: typeof item.sizeMm === "string" ? item.sizeMm : "—",
+        totalMeters: num(item.totalMeters) ?? 0,
+      });
+      continue;
+    }
+
+    // MCB, RCCB, DB, SWITCHGEAR — everything counted in pieces.
+    distribution.push({
+      category,
+      description,
+      quantity: num(item.quantity) ?? 0,
+      ratingAmps: num(item.ratingAmps),
+    });
+  }
+
+  // Heaviest gauge first: that is the main run, and it is what a dealer
+  // checks stock on before anything else.
+  cable.sort((a, b) => (b.sizeSqMm ?? 0) - (a.sizeSqMm ?? 0));
 
   const warnings = Array.isArray(raw.warnings)
     ? (raw.warnings as unknown[]).filter((w): w is string => typeof w === "string")
     : [];
 
   return {
-    totalConnectedLoadKw: raw.totalConnectedLoadKw as number,
-    maxDemandKw: raw.maxDemandKw as number,
-    totalCircuits: raw.totalCircuits as number,
-    pricing: {
-      materialCost: pricing.materialCost as number,
-    },
-    phaseDecision: {
-      finalRecommendation: phaseDecision.finalRecommendation as string,
-    },
-    items,
+    totalConnectedLoadKw,
+    maxDemandKw,
+    totalCircuits: totalCircuits ?? 0,
+    materialCost,
+    phase,
+    cable,
+    conduit,
+    distribution,
     warnings,
   };
 }
@@ -140,10 +158,13 @@ export default async function RfqDetailPage({ params }: PageProps) {
           totalPrice: true,
           brandOffered: true,
           wireGrade: true,
+          deliveryDays: true,
+          validUntil: true,
           status: true,
         },
         take: 1,
       },
+      _count: { select: { quotes: true } },
     },
   });
 
@@ -154,13 +175,25 @@ export default async function RfqDetailPage({ params }: PageProps) {
   const bom = parseBomSnapshot(rfq.project.bomData);
   const existingQuote = rfq.quotes[0] ?? null;
 
+  // Dealers without an approved profile can read a requisition but not bid on
+  // it — the same rule submitQuoteTransaction enforces, surfaced before the
+  // form rather than after a rejected submit.
+  const dealerProfile = await prisma.dealerProfile.findUnique({
+    where: { userId: session.user.id },
+    select: { approvalStatus: true },
+  });
+
   return (
     <RfqDetailClient
       rfqId={rfq.id}
-      rfqStatus={rfq.status}
+      rfqStatus={effectiveRfqStatus(rfq.status, rfq.expiresAt)}
       projectName={rfq.project.projectName}
       createdAt={rfq.createdAt.toISOString()}
+      expiresAt={rfq.expiresAt?.toISOString() ?? null}
       visibilityCity={rfq.visibilityCity}
+      bidCount={rfq._count.quotes}
+      maxQuotes={rfq.maxQuotes}
+      isApproved={dealerProfile?.approvalStatus === "APPROVED"}
       bom={bom}
       fallbackEstimate={rfq.project.totalEstimate}
       existingQuote={
@@ -170,6 +203,8 @@ export default async function RfqDetailPage({ params }: PageProps) {
               totalPrice: existingQuote.totalPrice,
               brandOffered: existingQuote.brandOffered,
               wireGrade: existingQuote.wireGrade,
+              deliveryDays: existingQuote.deliveryDays,
+              validUntil: existingQuote.validUntil?.toISOString() ?? null,
               status: existingQuote.status,
             }
           : null

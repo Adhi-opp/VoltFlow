@@ -1,5 +1,16 @@
 "use client";
 
+// src/app/dealer/profile/setup/page.tsx
+// ============================================================================
+// DEALER REGISTRATION SHEET
+// ============================================================================
+// A trade account form, laid out like one: ruled sections, compact fields, no
+// card chrome. Grouped by what the data is for rather than by field type —
+// identity, premises, then coverage — because the coverage block is the one
+// that actually decides which requisitions reach this dealer, and it deserves
+// to be its own section rather than two more inputs at the bottom of a list.
+// ============================================================================
+
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState, useTransition } from "react";
 import { useSession } from "next-auth/react";
@@ -7,17 +18,36 @@ import {
   saveDealerProfileAction,
   type DealerProfileInput,
 } from "@/features/dealer/actions";
+import { Section } from "@/components/spec-sheet";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+
+/** One labelled input on the sheet. Cells rule against each other. */
+function CellField({
+  id,
+  label,
+  hint,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-slate-100 px-3 py-2.5 last:border-b-0">
+      <Label htmlFor={id} className="spec-label">
+        {label}
+      </Label>
+      <div className="mt-1.5">{children}</div>
+      {hint && (
+        <p className="mt-1 text-[11px] leading-snug text-slate-500">{hint}</p>
+      )}
+    </div>
+  );
+}
 
 export default function DealerProfileSetupPage() {
   const router = useRouter();
@@ -41,7 +71,11 @@ export default function DealerProfileSetupPage() {
     if (status === "unauthenticated") {
       router.push("/login");
     }
-    if (status === "authenticated" && session?.user?.role !== "DEALER" && session?.user?.role !== "ADMIN") {
+    if (
+      status === "authenticated" &&
+      session?.user?.role !== "DEALER" &&
+      session?.user?.role !== "ADMIN"
+    ) {
       router.push("/dashboard");
     }
   }, [status, session, router]);
@@ -68,137 +102,165 @@ export default function DealerProfileSetupPage() {
 
   if (status === "loading") {
     return (
-      <main className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-lg items-center justify-center px-4">
-        <p className="text-muted-foreground">Loading...</p>
+      <main className="mx-auto w-full max-w-2xl px-4 py-10 sm:px-6">
+        <p className="border border-slate-200 bg-white px-3 py-8 text-center text-[13px] text-slate-500">
+          Loading…
+        </p>
       </main>
     );
   }
 
   return (
-    <main className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-lg items-center px-4 py-10">
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle>Set Up Your Dealer Profile</CardTitle>
-          <CardDescription>
-            Complete your business details to start receiving quote requests from
-            homeowners in your area.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={onSubmit}>
-            {error && (
-              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </p>
-            )}
-            {success && (
-              <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                Profile saved! Redirecting to dashboard...
-              </p>
-            )}
+    <main className="mx-auto min-h-screen w-full max-w-2xl px-4 py-10 sm:px-6">
+      <div className="mb-4 border-b border-slate-300 pb-3">
+        <p className="spec-label">Dealer Registration</p>
+        <h1 className="mt-1 text-xl font-bold tracking-tight text-slate-950">
+          Trade Account Details
+        </h1>
+        <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
+          Reviewed by an admin before your account can bid. Accuracy on GSTIN
+          and coverage matters — both are checked against the requisitions you
+          are shown.
+        </p>
+      </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="companyName">Company Name</Label>
+      {error && (
+        <p className="mb-3 border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+          {error}
+        </p>
+      )}
+      {success && (
+        <p className="mb-3 border border-emerald-300 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">
+          Profile saved. Redirecting to your dashboard…
+        </p>
+      )}
+
+      <form className="space-y-4" onSubmit={onSubmit}>
+        <Section index={1} title="Business Identity">
+          <CellField id="companyName" label="Registered Company Name">
+            <Input
+              id="companyName"
+              className="h-9 text-[13px]"
+              value={form.companyName}
+              onChange={(e) => update("companyName", e.target.value)}
+              placeholder="Singh Electricals & Cables"
+              required
+            />
+          </CellField>
+
+          <CellField
+            id="gstin"
+            label="GSTIN (optional)"
+            hint="Verified against the state code on your address. Accounts with a GSTIN clear approval faster."
+          >
+            <Input
+              id="gstin"
+              className="spec-num h-9 uppercase"
+              placeholder="07AAACH7409R1ZZ"
+              value={form.gstin}
+              onChange={(e) => update("gstin", e.target.value)}
+              maxLength={15}
+            />
+          </CellField>
+        </Section>
+
+        <Section index={2} title="Premises">
+          <CellField id="address" label="Business Address">
+            <Textarea
+              id="address"
+              className="text-[13px]"
+              value={form.address}
+              onChange={(e) => update("address", e.target.value)}
+              rows={2}
+              placeholder="M-14, Palika Bhawan, Nehru Place"
+              required
+            />
+          </CellField>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 sm:divide-x sm:divide-slate-100">
+            <CellField id="city" label="City">
               <Input
-                id="companyName"
-                value={form.companyName}
-                onChange={(e) => update("companyName", e.target.value)}
+                id="city"
+                className="h-9 text-[13px]"
+                value={form.city}
+                onChange={(e) => update("city", e.target.value)}
+                placeholder="NCR"
                 required
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="gstin">GSTIN (optional)</Label>
+            </CellField>
+            <CellField id="state" label="State">
               <Input
-                id="gstin"
-                placeholder="22AAAAA0000A1Z5"
-                value={form.gstin}
-                onChange={(e) => update("gstin", e.target.value)}
-                maxLength={15}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="address">Business Address</Label>
-              <Textarea
-                id="address"
-                value={form.address}
-                onChange={(e) => update("address", e.target.value)}
-                rows={2}
+                id="state"
+                className="h-9 text-[13px]"
+                value={form.state}
+                onChange={(e) => update("state", e.target.value)}
+                placeholder="Delhi"
                 required
               />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="city">City</Label>
-                <Input
-                  id="city"
-                  value={form.city}
-                  onChange={(e) => update("city", e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="state">State</Label>
-                <Input
-                  id="state"
-                  value={form.state}
-                  onChange={(e) => update("state", e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="pincode">Pincode</Label>
+            </CellField>
+            <CellField id="pincode" label="Pincode">
               <Input
                 id="pincode"
+                className="spec-num h-9"
                 value={form.pincode}
                 onChange={(e) => update("pincode", e.target.value)}
                 maxLength={6}
+                placeholder="110019"
                 required
               />
-            </div>
+            </CellField>
+          </div>
+        </Section>
 
-            <div className="space-y-2">
-              <Label htmlFor="serviceAreas">
-                Service Areas{" "}
-                <span className="text-xs text-muted-foreground">
-                  (comma-separated city names)
-                </span>
-              </Label>
-              <Input
-                id="serviceAreas"
-                placeholder="Delhi, Noida, Ghaziabad"
-                value={form.serviceAreas}
-                onChange={(e) => update("serviceAreas", e.target.value)}
-                required
-              />
-            </div>
+        <Section
+          index={3}
+          title="Coverage"
+          meta="Decides what reaches you"
+        >
+          <CellField
+            id="serviceAreas"
+            label="Service Areas"
+            hint="Comma-separated. Requisitions are matched on these plus your city. Include NCR — that is the area code most residential requests carry."
+          >
+            <Input
+              id="serviceAreas"
+              className="h-9 text-[13px]"
+              placeholder="NCR, Delhi, Noida, Gurugram"
+              value={form.serviceAreas}
+              onChange={(e) => update("serviceAreas", e.target.value)}
+              required
+            />
+          </CellField>
 
-            <div className="space-y-2">
-              <Label htmlFor="brandsSold">
-                Brands Sold{" "}
-                <span className="text-xs text-muted-foreground">
-                  (comma-separated)
-                </span>
-              </Label>
-              <Input
-                id="brandsSold"
-                placeholder="Polycab, Finolex, Havells"
-                value={form.brandsSold}
-                onChange={(e) => update("brandsSold", e.target.value)}
-                required
-              />
-            </div>
+          <CellField
+            id="brandsSold"
+            label="Brands Stocked"
+            hint="Shown to buyers alongside your bid."
+          >
+            <Input
+              id="brandsSold"
+              className="h-9 text-[13px]"
+              placeholder="Polycab, Havells, Finolex, RR Kabel"
+              value={form.brandsSold}
+              onChange={(e) => update("brandsSold", e.target.value)}
+              required
+            />
+          </CellField>
+        </Section>
 
-            <Button className="w-full" type="submit" disabled={isPending || success}>
-              {isPending ? "Saving..." : "Save Profile"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+        <div className="flex items-center justify-end gap-3 border-t border-slate-300 pt-3">
+          <p className="text-[11px] text-slate-500">
+            Submitted for admin review.
+          </p>
+          <Button
+            className="h-9 px-6"
+            type="submit"
+            disabled={isPending || success}
+          >
+            {isPending ? "Saving…" : "Save Profile"}
+          </Button>
+        </div>
+      </form>
     </main>
   );
 }
