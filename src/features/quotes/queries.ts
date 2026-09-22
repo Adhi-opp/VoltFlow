@@ -14,6 +14,40 @@
 
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import {
+  QUOTE_EXPIRY_WARNING_HOURS,
+  effectiveRfqStatus,
+  expiresWithinHours,
+  isExpired,
+} from "@/features/quotes/validity";
+
+/**
+ * How many quotes this dealer has submitted in the current calendar month.
+ *
+ * Replaces DealerProfile.quotesThisMonth, which was a stored tally that
+ * nothing ever reset — it counted upward for the life of the account while
+ * claiming to be a monthly figure.
+ *
+ * Derived instead. The Quote table already holds createdAt and is indexed on
+ * dealerId, so this is a covered count, not a scan: correct by construction,
+ * no background job, and it cannot drift out of sync with reality.
+ *
+ * Month boundaries are local-time, matching what a dealer sees on a calendar.
+ */
+export async function getDealerQuoteCountThisMonth(
+  dealerId: string,
+  now: Date = new Date()
+): Promise<number> {
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  return prisma.quote.count({
+    where: {
+      dealerId,
+      createdAt: { gte: startOfMonth, lt: startOfNextMonth },
+    },
+  });
+}
 
 export interface ProjectQuoteView {
   id: string;
@@ -24,6 +58,17 @@ export interface ProjectQuoteView {
   details: string | null;
   status: string;
   createdAt: string;
+  /** Null on quotes written before the field was defaulted. */
+  validUntil: string | null;
+  /**
+   * Expiry is resolved here rather than in the client on purpose. Comparing
+   * against `new Date()` inside a client component gives the server render and
+   * the hydration render two different clocks, and a quote sitting on the
+   * boundary would flip between "Lapsed" and a date — a hydration mismatch.
+   * One clock, decided server-side, renders identically in both passes.
+   */
+  hasLapsed: boolean;
+  expiresSoon: boolean;
   dealerName: string;
   dealerCity: string;
   /** Released only once a quote is accepted — this is the payoff, not a lead list. */
@@ -53,6 +98,9 @@ export async function getQuotesForProject(
   projectId: string,
   viewerId: string
 ): Promise<ProjectQuotesResult> {
+  // One clock for the whole read, so two rows cannot disagree about "now".
+  const now = new Date();
+
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
@@ -99,7 +147,9 @@ export async function getQuotesForProject(
   return {
     ok: true,
     projectName: project.projectName,
-    rfqStatus: rfq?.status ?? "CLOSED",
+    // Derived, not stored: nothing flips status to EXPIRED, so a lapsed
+    // request would otherwise keep presenting itself as open for quotes.
+    rfqStatus: rfq ? effectiveRfqStatus(rfq.status, rfq.expiresAt, now) : "CLOSED",
     projectEstimate: project.totalEstimate,
     quotes:
       rfq?.quotes.map((q) => ({
@@ -111,6 +161,13 @@ export async function getQuotesForProject(
         details: q.details,
         status: q.status,
         createdAt: q.createdAt.toISOString(),
+        validUntil: q.validUntil?.toISOString() ?? null,
+        hasLapsed: isExpired(q.validUntil, now),
+        expiresSoon: expiresWithinHours(
+          q.validUntil,
+          QUOTE_EXPIRY_WARNING_HOURS,
+          now
+        ),
         dealerName:
           q.dealer.dealerProfile?.companyName ?? q.dealer.name ?? "Dealer",
         dealerCity: q.dealer.dealerProfile?.city ?? "",

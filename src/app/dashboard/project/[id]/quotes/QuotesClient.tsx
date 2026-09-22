@@ -32,6 +32,10 @@ interface QuoteData {
   details: string | null;
   status: string;
   createdAt: string;
+  validUntil: string | null;
+  /** Resolved server-side — see ProjectQuoteView for why not here. */
+  hasLapsed: boolean;
+  expiresSoon: boolean;
   dealerName: string;
   dealerCity: string;
   dealerEmail: string | null;
@@ -231,8 +235,11 @@ export function QuotesClient({
                 <th className="spec-label px-3 py-2 text-right font-medium">
                   Delivery
                 </th>
+                {/* Was "Quoted". On a screen where you are deciding right
+                    now, when a quote arrived is trivia and when it lapses is
+                    a deadline. The arrival date moved to this cell's title. */}
                 <th className="spec-label px-3 py-2 text-right font-medium">
-                  Quoted
+                  Valid Until
                 </th>
                 <th className="spec-label px-3 py-2 text-right font-medium">
                   Action
@@ -249,6 +256,10 @@ export function QuotesClient({
                 const delta =
                   lowest !== null && !isRejected ? quote.totalPrice - lowest : null;
                 const isProcessing = isPending && actionId === quote.id;
+                // Mirrors the guard in acceptQuoteAction. Offering Accept on a
+                // price the server will refuse is a dead end the buyer only
+                // discovers after clicking.
+                const { hasLapsed, expiresSoon } = quote;
 
                 return (
                   <tr
@@ -310,8 +321,25 @@ export function QuotesClient({
                     <td className="spec-num px-3 py-2.5 text-right text-slate-600">
                       {quote.deliveryDays != null ? `${quote.deliveryDays} d` : "—"}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-[11px] text-slate-500">
-                      {formatDate(quote.createdAt)}
+                    <td
+                      className="px-3 py-2.5 text-right text-[11px]"
+                      title={`Quoted ${formatDate(quote.createdAt)}`}
+                    >
+                      {quote.validUntil ? (
+                        <span
+                          className={
+                            hasLapsed
+                              ? "font-medium text-destructive"
+                              : expiresSoon
+                                ? "font-medium text-amber-700"
+                                : "text-slate-500"
+                          }
+                        >
+                          {hasLapsed ? "Lapsed" : formatDate(quote.validUntil)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <div className="flex items-center justify-end gap-1.5">
@@ -321,7 +349,12 @@ export function QuotesClient({
                               size="sm"
                               className="h-7 px-2.5 text-xs"
                               onClick={() => handleAccept(quote.id)}
-                              disabled={isPending}
+                              disabled={isPending || hasLapsed}
+                              title={
+                                hasLapsed
+                                  ? "This price has lapsed — ask the dealer to requote."
+                                  : undefined
+                              }
                             >
                               {isProcessing ? "…" : "Accept"}
                             </Button>

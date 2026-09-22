@@ -5,6 +5,11 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { runEstimate } from "@/features/calculator/runEstimate";
 import { WIRE_GRADES } from "@/features/quotes/wireGrade";
+import {
+  isExpired,
+  quoteValidUntilFrom,
+  rfqExpiryFrom,
+} from "@/features/quotes/validity";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import {
@@ -251,7 +256,11 @@ async function submitQuoteTransaction(
           wireGrade: input.wireGrade ?? null,
           deliveryDays: input.deliveryDays ?? null,
           details: input.details ?? null,
-          validUntil: input.validUntil ?? null,
+          // Defaulted, not left null. An open-ended quote asks the dealer to
+          // hold a copper-linked price indefinitely, which is a risk they
+          // cannot hedge — so the platform sets the window unless the dealer
+          // names a different one.
+          validUntil: input.validUntil ?? quoteValidUntilFrom(now),
         },
         select: { id: true },
       });
@@ -273,14 +282,9 @@ async function submitQuoteTransaction(
         });
       }
 
-      await tx.dealerProfile.update({
-        where: { userId: dealerId },
-        data: {
-          quotesThisMonth: {
-            increment: 1,
-          },
-        },
-      });
+      // No counter increment here any more. quotesThisMonth was a stored tally
+      // with nothing to reset it; the count is now derived on demand by
+      // getDealerQuoteCountThisMonth().
 
       return { kind: "CREATED", quoteId: createdQuote.id } as const;
     },
@@ -392,6 +396,11 @@ export async function createQuoteRequestAction(
           status: quoteRequestStatus,
           visibilityCity,
           visibilityPincode: null,
+          // submitQuoteTransaction has always refused quotes past this date;
+          // until now nothing ever set it, so the check was dead code and
+          // requests stayed open forever. A DRAFT has no dealer visibility,
+          // so it gets no clock until it is opened.
+          expiresAt: quoteRequestStatus === "OPEN" ? rfqExpiryFrom(now) : null,
         },
         select: {
           id: true,
@@ -632,6 +641,13 @@ export async function acceptQuoteAction(quoteId: string): Promise<QuoteDecisionR
             throw new Error("ALREADY_PROCESSED");
           if (quote.quoteRequest.status !== "OPEN")
             throw new Error("RFQ_NOT_OPEN");
+          // A validity window the platform will not enforce is decoration.
+          // Accepting a lapsed price binds the dealer to a copper rate that
+          // may have moved under them, which is exactly what the field exists
+          // to prevent.
+          if (isExpired(quote.validUntil)) throw new Error("QUOTE_EXPIRED");
+          if (isExpired(quote.quoteRequest.expiresAt))
+            throw new Error("RFQ_NOT_OPEN");
 
           // 1. Accept this quote
           await tx.quote.update({
@@ -727,6 +743,12 @@ export async function acceptQuoteAction(quoteId: string): Promise<QuoteDecisionR
             return { success: false, error: "This quote has already been processed." };
           case "RFQ_NOT_OPEN":
             return { success: false, error: "This quote request is no longer open." };
+          case "QUOTE_EXPIRED":
+            return {
+              success: false,
+              error:
+                "This quote has passed its validity date. Ask the dealer to requote at current rates.",
+            };
         }
       }
 

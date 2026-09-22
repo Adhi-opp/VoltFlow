@@ -104,8 +104,13 @@ model DealerProfile {
   
   approvalStatus     ApprovalStatus   @default(PENDING)
   subscriptionTier   SubscriptionTier @default(FREEMIUM)
-  quotesThisMonth    Int              @default(0)
-  
+
+  // quotesThisMonth was removed here. A stored counter named for a calendar
+  // period needs something to reset it, and this project has no cron, queue or
+  // worker to do that — so it only ever counted upward, and the first tier
+  // limit built on it would have put every dealer permanently over quota.
+  // Derive it instead: getDealerQuoteCountThisMonth() in features/quotes.
+
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 

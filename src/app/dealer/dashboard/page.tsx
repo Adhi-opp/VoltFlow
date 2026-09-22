@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getDealerQuoteCountThisMonth } from "@/features/quotes/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,6 +90,10 @@ export default async function DealerDashboardPage() {
       visibilityCity: { in: serviceFilter, mode: "insensitive" },
       // Exclude RFQs this dealer has already quoted on
       quotes: { none: { dealerId: session.user.id } },
+      // And ones whose 72h window has closed. Nothing flips status to EXPIRED
+      // (no cron in this project), so the deadline is applied at read time.
+      // Legacy rows have no expiresAt and stay visible.
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
     include: {
       project: {
@@ -105,6 +110,9 @@ export default async function DealerDashboardPage() {
     orderBy: { createdAt: "desc" },
     take: 50,
   });
+
+  // Derived on demand, replacing the old DealerProfile.quotesThisMonth tally.
+  const quotesThisMonth = await getDealerQuoteCountThisMonth(session.user.id);
 
   // Also fetch RFQs this dealer has already quoted on
   const myQuotes = await prisma.quote.findMany({
@@ -129,7 +137,13 @@ export default async function DealerDashboardPage() {
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-14 sm:px-6">
       <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Dealer Dashboard</h1>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dealer Dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            <span className="tabular-nums">{quotesThisMonth}</span> quote
+            {quotesThisMonth === 1 ? "" : "s"} submitted this month
+          </p>
+        </div>
         <Button variant="outline" asChild>
           <Link href="/dealer/profile/setup">Edit Profile</Link>
         </Button>
