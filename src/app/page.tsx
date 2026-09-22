@@ -1,173 +1,211 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, House, ShieldCheck, Store } from "lucide-react";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 
 export const metadata: Metadata = {
   title: "Electrical Wiring Marketplace | Get Dealer Quotes",
   description:
-    "Calculate your home electrical wiring BOM and get competitive quotes from verified dealers in your city. Estimates aligned with IS 732 standard practice, for NCR.",
+    "Generate an engineer-grade electrical BOM for your build, or quote verified requirements from ready-to-buy contractors in your pincode. Aligned with IS 732 standard practice, for NCR.",
   openGraph: {
-    title: "PhaseZero - Electrical Wiring Marketplace",
+    title: "VoltFlow - Electrical Wiring Marketplace",
     description:
       "Free IS 732-aligned BOM calculator plus competing wholesale quotes from verified local dealers.",
   },
 };
 
-export default async function Home() {
-  const session = await auth();
-  const isLoggedIn = !!session?.user;
+// ---------------------------------------------------------------------------
+// Landing page
+// ---------------------------------------------------------------------------
+// Two audiences, two jobs, one screen. A homeowner and a dealer want opposite
+// things from this product, so the page does not try to sell both with one
+// headline — it splits down the middle and lets the reader pick a side.
+//
+// The halves are inverted (light / dark) rather than merely adjacent. On a
+// phone the split collapses to a stack, and the contrast is then the only
+// thing still telling the reader "this is a different door".
+// ---------------------------------------------------------------------------
+
+/** Small-caps eyebrow. Written inline rather than via .spec-label so the dark
+    column can set its own colour without fighting cascade order. */
+function Eyebrow({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <p
+      className={`text-[11px] font-medium uppercase leading-none tracking-[0.18em] ${className ?? ""}`}
+    >
+      {children}
+    </p>
+  );
+}
+
+/** Hairline-separated list of what that side actually gets. Nothing here is a
+    claim the product cannot already back with a computed or stored field. */
+function SpecList({
+  items,
+  tone,
+}: {
+  items: string[];
+  tone: "light" | "dark";
+}) {
+  const border = tone === "light" ? "border-slate-200" : "border-slate-800";
+  const text = tone === "light" ? "text-slate-600" : "text-slate-400";
 
   return (
-    <main className="relative min-h-screen w-full overflow-hidden bg-slate-50">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-      >
-        <div className="absolute -left-16 top-12 h-64 w-64 rounded-full bg-emerald-200/60 blur-3xl" />
-        <div className="absolute right-[-5rem] top-24 h-72 w-72 rounded-full bg-slate-200/70 blur-3xl" />
-        <div className="absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.14),transparent_58%)]" />
+    <ul className={`mt-10 border-t ${border} text-[13px] ${text}`}>
+      {items.map((item) => (
+        <li key={item} className={`border-b ${border} py-2.5 leading-snug`}>
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default async function Home() {
+  const session = await auth();
+  const isDealer = session?.user?.role === "DEALER";
+  const isLoggedIn = !!session?.user;
+  const isBuyer = isLoggedIn && !isDealer;
+
+  return (
+    <main className="w-full">
+      {/* Masthead rule — one line of positioning, then out of the way. */}
+      <div className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex h-12 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+          <Eyebrow className="text-slate-500">
+            Residential electrical estimation &middot; Delhi NCR
+          </Eyebrow>
+          <Link
+            href="/dashboard?demo=true"
+            className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500 underline-offset-4 hover:text-slate-900 hover:underline"
+          >
+            Sample project
+          </Link>
+        </div>
       </div>
 
-      <section className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center px-4 py-16">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="animate-fade-in-up mx-auto inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-1.5 text-sm font-medium text-slate-600 shadow-sm shadow-slate-200/70">
-            <ShieldCheck className="h-4 w-4 text-emerald-600" />
-            Modern procurement for residential electrical projects
-          </div>
+      <div className="grid grid-cols-1 md:min-h-[calc(100vh-3.5rem-3rem)] md:grid-cols-2">
+        {/* ── Left: homeowners & builders ─────────────────────────────── */}
+        <section className="flex flex-col justify-center border-b border-slate-200 bg-white px-6 py-14 md:border-b-0 md:border-r md:px-10 md:py-20 lg:px-16">
+          <div className="mx-auto w-full max-w-md md:mx-0 md:ml-auto md:max-w-sm lg:max-w-md">
+            <Eyebrow className="text-slate-500">
+              Homeowners &amp; Builders
+            </Eyebrow>
 
-          <h1 className="animate-fade-in-up delay-100 mt-8 text-4xl font-bold tracking-tight text-slate-950 sm:text-5xl md:text-6xl">
-            Know exactly what wiring
-            <span className="block text-slate-700">your house needs.</span>
-          </h1>
+            <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight text-slate-950 sm:text-5xl">
+              Plan the Build.
+            </h1>
 
-          <p className="animate-fade-in-up delay-200 mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            Generate engineer-grade electrical BOMs and source competing
-            wholesale quotes from verified local dealers.
-          </p>
-
-          <p className="animate-fade-in-up delay-200 mx-auto mt-4 max-w-2xl text-base leading-7 text-slate-500">
-            Coil counts, wire gauges, conduit runs, MCB schedule and connected
-            load — the same numbers your electrician works from, so you can
-            check a quote instead of taking it on trust.
-          </p>
-        </div>
-
-        {isLoggedIn ? (
-          <div className="animate-fade-in-up delay-300 mt-10 flex flex-col gap-4 sm:flex-row">
-            <Button
-              asChild
-              size="lg"
-              className="px-8 shadow-sm shadow-emerald-200/80"
-            >
-              <Link href="/calculator">New Estimate</Link>
-            </Button>
-            <Button
-              asChild
-              variant="outline"
-              size="lg"
-              className="border-slate-200 bg-white px-8 text-slate-700 hover:border-emerald-200 hover:bg-emerald-50"
-            >
-              <Link href="/dashboard">Dashboard</Link>
-            </Button>
-          </div>
-        ) : (
-          <div className="animate-fade-in-up delay-300 mt-10 flex flex-col items-center gap-3">
-            <Button
-              asChild
-              size="lg"
-              className="h-12 px-10 text-base font-semibold shadow-sm shadow-emerald-200/80"
-            >
-              <Link href="/calculator">Calculate Your Estimate</Link>
-            </Button>
-            <p className="text-sm text-slate-500">
-              Free, and no account needed.{" "}
-              <Link
-                href="/login"
-                className="font-medium text-slate-700 underline-offset-4 hover:underline"
-              >
-                Sign in
-              </Link>{" "}
-              only when you want to save it or get dealer quotes.
+            <p className="mt-4 text-[15px] leading-7 text-slate-600">
+              Generate an engineer-grade electrical BOM and source wholesale
+              quotes.
             </p>
-          </div>
-        )}
 
-        {!isLoggedIn && (
-          <div className="animate-fade-in delay-500 absolute bottom-8">
-            <div className="h-8 w-5 rounded-full border-2 border-slate-300 bg-white/70 p-1 shadow-sm shadow-slate-200/60">
-              <div className="animate-bounce h-2 w-full rounded-full bg-emerald-600" />
+            <div className="mt-8">
+              <Button
+                asChild
+                className="h-12 w-full px-8 text-[15px] font-semibold sm:w-auto"
+              >
+                <Link href="/calculator">
+                  {isBuyer ? "New Estimate" : "Calculate Your Estimate"}
+                </Link>
+              </Button>
+
+              <p className="mt-3 text-[13px] text-slate-500">
+                {isBuyer ? (
+                  <>
+                    Or open your{" "}
+                    <Link
+                      href="/dashboard"
+                      className="font-medium text-slate-900 underline-offset-4 hover:underline"
+                    >
+                      saved projects
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Free, and no account needed. Sign in only to save it or
+                    request quotes.
+                  </>
+                )}
+              </p>
             </div>
+
+            <SpecList
+              tone="light"
+              items={[
+                "Circuit schedule with MCB ratings and phase recommendation",
+                "Cable lengths rounded to purchasable coils, by gauge",
+                "Connected load and diversified maximum demand",
+              ]}
+            />
           </div>
-        )}
-      </section>
-
-      {!isLoggedIn && (
-        <section className="relative mx-auto max-w-5xl px-4 pb-20 sm:px-6">
-          <p className="mb-8 text-center text-sm font-medium uppercase tracking-[0.24em] text-slate-500">
-            Choose how to get started:
-          </p>
-          <div className="grid gap-6 md:grid-cols-2">
-            <Link href="/register?role=HOMEOWNER" className="group">
-              <Card className="hover-lift h-full border-slate-200 bg-white/95 transition-colors group-hover:border-emerald-200">
-                <CardHeader>
-                  <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-                    <House className="h-6 w-6" />
-                  </div>
-                  <CardTitle className="text-xl text-slate-950">
-                    I am a Homeowner
-                  </CardTitle>
-                  <CardDescription className="text-base text-slate-600">
-                    Calculate estimates and find verified dealers.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex items-center gap-2 text-sm font-medium text-emerald-700">
-                  Continue as Homeowner
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </CardContent>
-              </Card>
-            </Link>
-
-            <Link href="/register?role=DEALER" className="group">
-              <Card className="hover-lift h-full border-slate-200 bg-white/95 transition-colors group-hover:border-slate-300">
-                <CardHeader>
-                  <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-800">
-                    <Store className="h-6 w-6" />
-                  </div>
-                  <CardTitle className="text-xl text-slate-950">
-                    I am a Dealer
-                  </CardTitle>
-                  <CardDescription className="text-base text-slate-600">
-                    Bid on verified electrical projects.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                  Continue as Dealer
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </CardContent>
-              </Card>
-            </Link>
-          </div>
-
-          <p className="mt-8 text-center text-sm text-slate-500">
-            Just looking?{" "}
-            <Link
-              href="/dashboard?demo=true"
-              className="font-medium text-primary hover:underline"
-            >
-              Try the demo
-            </Link>
-          </p>
         </section>
-      )}
+
+        {/* ── Right: dealers & distributors ───────────────────────────── */}
+        <section className="flex flex-col justify-center bg-slate-950 px-6 py-14 md:px-10 md:py-20 lg:px-16">
+          <div className="mx-auto w-full max-w-md md:mx-0 md:mr-auto md:max-w-sm lg:max-w-md">
+            <Eyebrow className="text-slate-500">
+              Dealers &amp; Distributors
+            </Eyebrow>
+
+            <h2 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight text-white sm:text-5xl">
+              Quote the Job.
+            </h2>
+
+            <p className="mt-4 text-[15px] leading-7 text-slate-400">
+              Access verified electrical requirements from ready-to-buy
+              contractors in your pincode.
+            </p>
+
+            <div className="mt-8">
+              <Button
+                asChild
+                className="h-12 w-full bg-white px-8 text-[15px] font-semibold text-slate-950 hover:bg-slate-200 sm:w-auto"
+              >
+                <Link
+                  href={isDealer ? "/dealer/dashboard" : "/register?role=DEALER"}
+                >
+                  Dealer Portal
+                </Link>
+              </Button>
+
+              <p className="mt-3 text-[13px] text-slate-500">
+                {isDealer ? (
+                  <>Open requests are listed on your dashboard.</>
+                ) : (
+                  <>
+                    Already registered?{" "}
+                    <Link
+                      href="/login"
+                      className="font-medium text-slate-300 underline-offset-4 hover:underline"
+                    >
+                      Sign in
+                    </Link>
+                    .
+                  </>
+                )}
+              </p>
+            </div>
+
+            <SpecList
+              tone="dark"
+              items={[
+                "Every request arrives with a full itemised BOM",
+                "Filtered to the service areas on your dealer profile",
+                "Respond with brand, total price and delivery window",
+              ]}
+            />
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

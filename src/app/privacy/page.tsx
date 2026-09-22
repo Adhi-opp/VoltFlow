@@ -77,7 +77,7 @@ export default function PrivacyPage() {
           <p>
             For privacy-related concerns, email us at{" "}
             <span className="font-medium text-foreground">
-              privacy@phasezero.in
+              privacy@voltflow.in
             </span>
             .
           </p>

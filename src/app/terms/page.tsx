@@ -18,7 +18,7 @@ export default function TermsPage() {
             Platform Description
           </h2>
           <p>
-            PhaseZero is a two-sided marketplace connecting homeowners and
+            VoltFlow is a two-sided marketplace connecting homeowners and
             contractors with electrical material dealers. The platform provides an
             Bill of Materials calculator aligned with IS 732 standard practice, and
             a Request for Quotation engine. Outputs are informational estimates, not
@@ -35,7 +35,7 @@ export default function TermsPage() {
             and intended for reference and dealer quoting purposes only. Actual
             material requirements may vary by &plusmn;10-15% depending on site
             conditions. Final specifications must be verified by a licensed
-            electrical professional prior to procurement and installation. PhaseZero
+            electrical professional prior to procurement and installation. VoltFlow
             accepts no liability for estimates used without professional
             verification.
           </p>
@@ -47,7 +47,7 @@ export default function TermsPage() {
           </h2>
           <ul className="ml-4 list-disc space-y-1">
             <li>
-              PhaseZero facilitates connections between buyers and sellers but is
+              VoltFlow facilitates connections between buyers and sellers but is
               not a party to any transaction.
             </li>
             <li>
@@ -89,10 +89,10 @@ export default function TermsPage() {
             Limitation of Liability
           </h2>
           <p>
-            PhaseZero provides the platform &ldquo;as is&rdquo; without warranties
+            VoltFlow provides the platform &ldquo;as is&rdquo; without warranties
             of any kind. We are not liable for any damages arising from the use of
             our calculator estimates, marketplace transactions, or dealer
-            interactions. Maximum liability is limited to the fees paid to PhaseZero
+            interactions. Maximum liability is limited to the fees paid to VoltFlow
             in the preceding 12 months.
           </p>
         </section>
@@ -104,7 +104,7 @@ export default function TermsPage() {
           <p>
             For questions about these terms, email{" "}
             <span className="font-medium text-foreground">
-              legal@phasezero.in
+              legal@voltflow.in
             </span>
             .
           </p>

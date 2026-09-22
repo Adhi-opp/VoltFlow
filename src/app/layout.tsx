@@ -18,16 +18,16 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL || "https://phasezero.in"
+    process.env.NEXT_PUBLIC_APP_URL || "https://voltflow.in"
   ),
   title: {
-    default: "PhaseZero — Electrical BOM Calculator & Marketplace",
-    template: "%s | PhaseZero",
+    default: "VoltFlow — Electrical BOM Calculator & Marketplace",
+    template: "%s | VoltFlow",
   },
   description:
     "India's electrical wiring marketplace. BOM calculator aligned with IS 732 standard practice, with competitive dealer quotes.",
   openGraph: {
-    siteName: "PhaseZero",
+    siteName: "VoltFlow",
     type: "website",
     locale: "en_IN",
   },

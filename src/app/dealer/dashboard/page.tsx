@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/card";
 
 export const metadata: Metadata = {
-  title: "Dealer Dashboard — PhaseZero",
+  title: "Dealer Dashboard — VoltFlow",
   description: "View and respond to open quote requests.",
 };
 
