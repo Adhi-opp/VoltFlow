@@ -135,7 +135,13 @@ export default async function RfqDetailPage({ params }: PageProps) {
       },
       quotes: {
         where: { dealerId: session.user.id },
-        select: { id: true, totalPrice: true, brandOffered: true, status: true },
+        select: {
+          id: true,
+          totalPrice: true,
+          brandOffered: true,
+          wireGrade: true,
+          status: true,
+        },
         take: 1,
       },
     },
@@ -163,6 +169,7 @@ export default async function RfqDetailPage({ params }: PageProps) {
               id: existingQuote.id,
               totalPrice: existingQuote.totalPrice,
               brandOffered: existingQuote.brandOffered,
+              wireGrade: existingQuote.wireGrade,
               status: existingQuote.status,
             }
           : null

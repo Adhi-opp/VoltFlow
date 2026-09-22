@@ -3,6 +3,12 @@
 import Link from "next/link";
 import { FormEvent, useState, useTransition } from "react";
 import { submitQuoteAction } from "@/features/quotes/actions";
+import {
+  WIRE_GRADES,
+  WIRE_GRADE_META,
+  wireGradeShort,
+  type WireGrade,
+} from "@/features/quotes/wireGrade";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,6 +61,7 @@ interface Props {
     id: string;
     totalPrice: number;
     brandOffered: string;
+    wireGrade: string | null;
     status: string;
   } | null;
 }
@@ -97,6 +104,10 @@ export function RfqDetailClient({
 
   const [totalPrice, setTotalPrice] = useState("");
   const [brandOffered, setBrandOffered] = useState("");
+  // Defaults to FR, the standard residential grade in NCR. A required field
+  // with no default would make every dealer pick the same value anyway; a
+  // default that is not the common case would quietly corrupt the comparison.
+  const [wireGrade, setWireGrade] = useState<WireGrade>("FR");
   const [deliveryDays, setDeliveryDays] = useState("");
   const [details, setDetails] = useState("");
 
@@ -120,6 +131,7 @@ export function RfqDetailClient({
         clientRequestId: crypto.randomUUID(),
         totalPrice: price,
         brandOffered: brandOffered.trim(),
+        wireGrade,
         deliveryDays: deliveryDays ? parseInt(deliveryDays, 10) : undefined,
         details: details.trim() || undefined,
       });
@@ -325,6 +337,12 @@ export function RfqDetailClient({
                     <span>{existingQuote.brandOffered}</span>
                   </div>
                   <div className="flex justify-between">
+                    <span className="text-muted-foreground">Wire Grade</span>
+                    <span>
+                      {wireGradeShort(existingQuote.wireGrade) ?? "Not specified"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
                     <span className="text-muted-foreground">Status</span>
                     <Badge
                       variant={
@@ -384,6 +402,30 @@ export function RfqDetailClient({
                       required
                       disabled={submitted}
                     />
+                  </div>
+
+                  {/* Native select, not the popover component: a dealer fills
+                      this on a phone in a shop, and the OS picker beats a
+                      custom dropdown there. Styled to match Input. */}
+                  <div className="space-y-2">
+                    <Label htmlFor="wireGrade">Wire Grade</Label>
+                    <select
+                      id="wireGrade"
+                      value={wireGrade}
+                      onChange={(e) => setWireGrade(e.target.value as WireGrade)}
+                      disabled={submitted}
+                      className="border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                    >
+                      {WIRE_GRADES.map((grade) => (
+                        <option key={grade} value={grade}>
+                          {WIRE_GRADE_META[grade].label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      The buyer compares grades side by side — quoting a higher
+                      grade explains a higher price.
+                    </p>
                   </div>
 
                   <div className="space-y-2">

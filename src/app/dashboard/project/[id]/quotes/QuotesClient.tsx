@@ -11,13 +11,23 @@
 // ============================================================================
 
 import { useState, useTransition } from "react";
-import { acceptQuoteAction, rejectQuoteAction } from "@/features/quotes/actions";
+import { Trash2 } from "lucide-react";
+import {
+  acceptQuoteAction,
+  hideQuoteAction,
+  rejectQuoteAction,
+} from "@/features/quotes/actions";
+import {
+  wireGradeDescription,
+  wireGradeShort,
+} from "@/features/quotes/wireGrade";
 import { Button } from "@/components/ui/button";
 
 interface QuoteData {
   id: string;
   totalPrice: number;
   brandOffered: string;
+  wireGrade: string | null;
   deliveryDays: number | null;
   details: string | null;
   status: string;
@@ -32,6 +42,28 @@ interface Props {
   quotes: QuoteData[];
   /** Project estimate, for the spread-vs-estimate summary row. */
   projectEstimate?: number | null;
+  /** Gates Remove on live quotes — see canRemove. */
+  rfqStatus?: string;
+  /**
+   * Demo mode has no session, so the server action would reject every call.
+   * Remove is handled locally instead, which is what the visitor is there to
+   * see — a button that errors would be worse than no button at all.
+   */
+  demoMode?: boolean;
+}
+
+/**
+ * Mirrors the guard in hideQuoteAction. Kept in sync deliberately: the server
+ * is the authority, but offering a button that always errors is its own bug.
+ *
+ * A live quote on an open request is not removable — the dealer is waiting on
+ * an answer, and the honest way to clear it is Reject. Once the request is
+ * closed or expired nobody is waiting, so stale rows can go.
+ */
+function canRemove(status: string, rfqStatus: string): boolean {
+  if (status === "ACCEPTED") return false;
+  if (status === "SUBMITTED") return rfqStatus !== "OPEN";
+  return true;
 }
 
 function formatINR(amount: number): string {
@@ -65,7 +97,12 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) {
+export function QuotesClient({
+  quotes: initialQuotes,
+  projectEstimate,
+  rfqStatus = "CLOSED",
+  demoMode = false,
+}: Props) {
   const [quotes, setQuotes] = useState(initialQuotes);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +147,30 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
     );
   }
 
+  /**
+   * Remove: optimistic, because the point of the button is that the row goes
+   * away. Waiting ~200ms for a round trip before a dismissal takes effect is
+   * exactly the lag that makes people click twice.
+   *
+   * The row is restored if the server refuses — it can, e.g. on an accepted
+   * quote — and the reason is surfaced instead of the row silently returning.
+   */
+  function handleRemove(quoteId: string) {
+    const snapshot = quotes;
+    setError(null);
+    setQuotes((prev) => prev.filter((q) => q.id !== quoteId));
+
+    if (demoMode) return;
+
+    startTransition(async () => {
+      const result = await hideQuoteAction(quoteId);
+      if (!result.success) {
+        setQuotes(snapshot);
+        setError(result.error);
+      }
+    });
+  }
+
   const hasAccepted = quotes.some((q) => q.status === "ACCEPTED");
   const live = quotes.filter((q) => q.status !== "REJECTED");
   const prices = live.map((q) => q.totalPrice);
@@ -120,10 +181,22 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
   const acceptedQuote = quotes.find((q) => q.status === "ACCEPTED");
 
   if (quotes.length === 0) {
+    // Distinguish "none arrived" from "you removed them all" — the second is
+    // a state the user created, and telling them dealers have been notified
+    // would read as if the removal had not worked.
     return (
-      <p className="border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-500">
-        No quotes yet. Verified dealers in your area have been notified.
-      </p>
+      <div className="space-y-3">
+        {error && (
+          <p className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <p className="border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-500">
+          {initialQuotes.length > 0
+            ? "You have removed every quote on this project. Reload to confirm, or ask for fresh quotes."
+            : "No quotes yet. Verified dealers in your area have been notified."}
+        </p>
+      </div>
     );
   }
 
@@ -137,7 +210,7 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
 
       <div className="border border-slate-200 bg-white">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-[13px]">
+          <table className="w-full min-w-[820px] text-[13px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th className="spec-label px-3 py-2 text-left font-medium">
@@ -145,6 +218,9 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
                 </th>
                 <th className="spec-label px-3 py-2 text-left font-medium">
                   Brand
+                </th>
+                <th className="spec-label px-3 py-2 text-left font-medium">
+                  Wire Grade
                 </th>
                 <th className="spec-label px-3 py-2 text-right font-medium">
                   Total (ex-GST)
@@ -205,6 +281,18 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
                       )}
                     </td>
                     <td className="px-3 py-2.5">{quote.brandOffered}</td>
+                    <td className="px-3 py-2.5">
+                      {wireGradeShort(quote.wireGrade) ? (
+                        <span
+                          className="spec-num border border-slate-300 px-1.5 py-0.5 text-[11px] font-medium"
+                          title={wireGradeDescription(quote.wireGrade) ?? undefined}
+                        >
+                          {wireGradeShort(quote.wireGrade)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
                     <td
                       className={`spec-num px-3 py-2.5 text-right font-semibold ${
                         isRejected ? "line-through" : "text-slate-900"
@@ -226,29 +314,48 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
                       {formatDate(quote.createdAt)}
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      {isSubmitted && !hasAccepted ? (
-                        <div className="flex justify-end gap-1.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {isSubmitted && !hasAccepted ? (
+                          <>
+                            <Button
+                              size="sm"
+                              className="h-7 px-2.5 text-xs"
+                              onClick={() => handleAccept(quote.id)}
+                              disabled={isPending}
+                            >
+                              {isProcessing ? "…" : "Accept"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2.5 text-xs"
+                              onClick={() => handleReject(quote.id)}
+                              disabled={isPending}
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        ) : (
+                          <StatusPill status={quote.status} />
+                        )}
+
+                        {/* Remove is deliberately quiet — it is housekeeping,
+                            not a decision. Withheld on the accepted quote,
+                            whose row carries the dealer's contact details. */}
+                        {canRemove(quote.status, rfqStatus) && (
                           <Button
-                            size="sm"
-                            className="h-7 px-2.5 text-xs"
-                            onClick={() => handleAccept(quote.id)}
+                            size="icon-sm"
+                            variant="ghost"
+                            className="h-7 w-7 text-slate-400 hover:text-destructive"
+                            onClick={() => handleRemove(quote.id)}
                             disabled={isPending}
+                            title="Remove from this comparison"
+                            aria-label={`Remove the quote from ${quote.dealerName}`}
                           >
-                            {isProcessing ? "…" : "Accept"}
+                            <Trash2 className="size-3.5" />
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2.5 text-xs"
-                            onClick={() => handleReject(quote.id)}
-                            disabled={isPending}
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      ) : (
-                        <StatusPill status={quote.status} />
-                      )}
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -258,10 +365,9 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
             {live.length > 1 && (
               <tfoot>
                 <tr className="border-t border-slate-300 bg-slate-50">
-                  <td
-                    className="spec-label px-3 py-2"
-                    colSpan={2}
-                  >
+                  {/* colSpan tracks the 8 header cells: Dealer, Brand,
+                      Wire Grade | Total | vs Lowest, Delivery, Quoted | Action */}
+                  <td className="spec-label px-3 py-2" colSpan={3}>
                     {live.length} live quotes
                   </td>
                   <td className="spec-num px-3 py-2 text-right font-semibold text-slate-900">
@@ -286,7 +392,7 @@ export function QuotesClient({ quotes: initialQuotes, projectEstimate }: Props) 
                 </tr>
                 {projectEstimate != null && lowest !== null && (
                   <tr className="border-t border-slate-200 bg-slate-50">
-                    <td className="spec-label px-3 py-2" colSpan={2}>
+                    <td className="spec-label px-3 py-2" colSpan={3}>
                       vs your estimate
                     </td>
                     <td className="spec-num px-3 py-2 text-right text-slate-600">

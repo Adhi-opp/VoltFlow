@@ -166,10 +166,27 @@ model Quote {
   
   totalPrice       Float
   brandOffered     String       // Prevent "race to the bottom" unbranded materials
+
+  // Insulation grade quoted: FR | FRLS | ZHFR. Two dealers quoting the same
+  // brand at different grades are not quoting the same job, so price alone is
+  // a misleading comparison without this. Stored as the short code, not the
+  // display label — see src/features/quotes/wireGrade.ts.
+  //
+  // Nullable because quotes predate the field; a String rather than an enum so
+  // a new grade does not need a migration to be accepted. The allowed values
+  // are enforced in submitQuoteSchema.
+  wireGrade        String?
+
   deliveryDays     Int?
   details          String?      @db.Text
   status           QuoteStatus  @default(SUBMITTED)
-  
+
+  // Buyer-side "Remove": drops the row from the comparison matrix without
+  // deleting it. The quote still counts toward the RFQ's quoteCount, still
+  // belongs to the dealer's history, and still appears in admin analytics.
+  // Hiding is a view preference, never a deletion.
+  isHidden         Boolean      @default(false)
+
   createdAt        DateTime     @default(now())
   validUntil       DateTime?
 

@@ -4,6 +4,7 @@ import { Prisma, QuoteRequestStatus } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { runEstimate } from "@/features/calculator/runEstimate";
+import { WIRE_GRADES } from "@/features/quotes/wireGrade";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import {
@@ -19,6 +20,9 @@ const submitQuoteSchema = z.object({
   clientRequestId: z.string().uuid(),
   totalPrice: z.number().positive(),
   brandOffered: z.string().trim().min(1).max(120),
+  // Stored as a plain String? column so a future grade needs no migration,
+  // but constrained here — the comparison matrix relies on a closed set.
+  wireGrade: z.enum(WIRE_GRADES).optional(),
   deliveryDays: z.number().int().min(1).max(365).optional(),
   details: z.string().trim().max(5000).optional(),
   validUntil: z.coerce.date().optional(),
@@ -244,6 +248,7 @@ async function submitQuoteTransaction(
           clientRequestId: input.clientRequestId,
           totalPrice: input.totalPrice,
           brandOffered: input.brandOffered,
+          wireGrade: input.wireGrade ?? null,
           deliveryDays: input.deliveryDays ?? null,
           details: input.details ?? null,
           validUntil: input.validUntil ?? null,
@@ -830,5 +835,96 @@ export async function rejectQuoteAction(quoteId: string): Promise<QuoteDecisionR
   }
 
   return { success: false, error: "Failed to reject quote after retries. Please try again." };
+}
+
+// ---------------------------------------------------------------------------
+// Hide quote ("Remove" in the UI)
+// ---------------------------------------------------------------------------
+
+/**
+ * Drops a quote out of the buyer's comparison matrix.
+ *
+ * This is a view preference, not a deletion. The row is untouched: the dealer
+ * still sees it in their history, it still counts toward the RFQ's quoteCount,
+ * and it still feeds admin analytics. Only `getQuotesForProject` filters on it.
+ *
+ * Two statuses are refused, and both for the same reason — hiding would leave
+ * someone stranded:
+ *
+ *   SUBMITTED on a still-OPEN RFQ  the dealer is actively waiting on an answer.
+ *                                  Making their quote silently vanish from the
+ *                                  buyer's screen means it is never accepted
+ *                                  and never rejected. Reject it first; that
+ *                                  sends the dealer their notification, and the
+ *                                  row can then be removed.
+ *
+ *   ACCEPTED                       this is the deal in progress. The dealer's
+ *                                  phone and email are only rendered on that
+ *                                  row, so hiding it destroys the buyer's only
+ *                                  route to the person they just hired.
+ *
+ * A SUBMITTED quote on a CLOSED or EXPIRED request *can* be hidden: nobody is
+ * waiting on that any more, and stale rows are exactly what needs clearing.
+ */
+export async function hideQuoteAction(quoteId: string): Promise<QuoteDecisionResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, error: "You must be signed in." };
+  }
+
+  try {
+    const quote = await prisma.quote.findUnique({
+      where: { id: quoteId },
+      select: {
+        status: true,
+        isHidden: true,
+        quoteRequest: {
+          select: {
+            status: true,
+            project: { select: { ownerId: true } },
+          },
+        },
+      },
+    });
+
+    if (!quote) {
+      return { success: false, error: "Quote not found." };
+    }
+
+    if (quote.quoteRequest.project.ownerId !== session.user.id) {
+      return { success: false, error: "You do not own this project." };
+    }
+
+    if (quote.status === "ACCEPTED") {
+      return {
+        success: false,
+        error: "You cannot remove the quote you accepted — it holds the dealer's contact details.",
+      };
+    }
+
+    if (quote.status === "SUBMITTED" && quote.quoteRequest.status === "OPEN") {
+      return {
+        success: false,
+        error: "Reject this quote first. The dealer is still waiting on a decision.",
+      };
+    }
+
+    // Idempotent: hiding an already-hidden quote is a no-op success, so a
+    // double click or a stale tab cannot produce a spurious error.
+    if (!quote.isHidden) {
+      await prisma.quote.update({
+        where: { id: quoteId },
+        data: { isHidden: true },
+      });
+    }
+
+    return { success: true };
+  } catch (err) {
+    logger.error("Failed to hide quote", {
+      error: err instanceof Error ? err.message : "Unknown",
+      quoteId,
+    });
+    return { success: false, error: "Failed to remove quote. Please try again." };
+  }
 }
 

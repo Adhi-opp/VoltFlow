@@ -47,7 +47,12 @@ export const DEMO_DASHBOARD_PROJECTS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Quotes — structural match with QuotesClient's QuoteData interface
+// Quotes — structural match with ProjectQuoteView
+// ---------------------------------------------------------------------------
+// Grades are deliberately mixed. The cheapest quote here is also the lowest
+// insulation grade, which is the whole point of showing the column: a visitor
+// scanning the demo should see for themselves that the lowest number is not
+// automatically the best deal.
 // ---------------------------------------------------------------------------
 
 export const DEMO_QUOTES = [
@@ -55,8 +60,9 @@ export const DEMO_QUOTES = [
     id: "demo-q1",
     totalPrice: 72000,
     brandOffered: "Polycab",
+    wireGrade: "FR",
     deliveryDays: 3,
-    details: "Full Polycab FRLS range. Includes free installation supervision for NCR.",
+    details: "Standard Polycab FR range. Includes free installation supervision for NCR.",
     status: "SUBMITTED",
     createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     dealerName: "Gupta Electricals, Noida",
@@ -68,8 +74,9 @@ export const DEMO_QUOTES = [
     id: "demo-q2",
     totalPrice: 78500,
     brandOffered: "Finolex",
+    wireGrade: "FRLS",
     deliveryDays: 5,
-    details: "Finolex Flame Retardant wires with 2-year warranty extension.",
+    details: "Finolex FRLS wires with 2-year warranty extension.",
     status: "SUBMITTED",
     createdAt: new Date(Date.now() - 1.5 * 60 * 60 * 1000).toISOString(),
     dealerName: "NCR Wire House, Ghaziabad",
@@ -81,9 +88,12 @@ export const DEMO_QUOTES = [
     id: "demo-q3",
     totalPrice: 84000,
     brandOffered: "Havells",
+    wireGrade: "FRLS",
     deliveryDays: 2,
     details: "Havells Lifeline Plus. Express 2-day delivery for NCR projects.",
-    status: "SUBMITTED",
+    // Left rejected on purpose: it is the one row in the demo that shows what
+    // a decided quote looks like, and the only one offering Remove.
+    status: "REJECTED",
     createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
     dealerName: "Capital Cables, Delhi",
     dealerCity: "Delhi",
@@ -94,8 +104,10 @@ export const DEMO_QUOTES = [
     id: "demo-q4",
     totalPrice: 95000,
     brandOffered: "Anchor by Panasonic",
+    wireGrade: "ZHFR",
     deliveryDays: 4,
-    details: "Premium Anchor Roma modular range included. Full wiring harness kit.",
+    details:
+      "Zero-halogen cable throughout. Premium Anchor Roma modular range included, full wiring harness kit.",
     status: "SUBMITTED",
     createdAt: new Date(Date.now() - 0.5 * 60 * 60 * 1000).toISOString(),
     dealerName: "Metro Electrical, Gurugram",

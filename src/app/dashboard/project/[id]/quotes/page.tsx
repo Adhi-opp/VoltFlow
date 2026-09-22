@@ -2,7 +2,10 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import {
+  getQuotesForProject,
+  type ProjectQuoteView,
+} from "@/features/quotes/queries";
 import {
   DEMO_QUOTES,
   DEMO_PROJECT_NAME,
@@ -48,8 +51,7 @@ export default async function QuotesPage({ params, searchParams }: PageProps) {
   let projectName: string;
   let rfqStatus: string;
   let projectEstimate: number | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- demo + Prisma shapes unified
-  let quotes: any[];
+  let quotes: ProjectQuoteView[];
 
   if (isDemo) {
     projectName = DEMO_PROJECT_NAME;
@@ -62,62 +64,21 @@ export default async function QuotesPage({ params, searchParams }: PageProps) {
       redirect("/login");
     }
 
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      include: {
-        quoteRequest: {
-          include: {
-            quotes: {
-              include: {
-                dealer: {
-                  select: {
-                    name: true,
-                    email: true,
-                    phone: true,
-                    dealerProfile: {
-                      select: {
-                        companyName: true,
-                        city: true,
-                        brandsSold: true,
-                      },
-                    },
-                  },
-                },
-              },
-              orderBy: { totalPrice: "asc" as const },
-            },
-          },
-        },
-      },
-    });
+    // Ownership and the isHidden filter both live in the query, so a new
+    // caller cannot accidentally skip either one.
+    const result = await getQuotesForProject(projectId, session.user.id);
 
-    if (!project) {
-      notFound();
-    }
-
-    if (project.ownerId !== session.user.id) {
+    if (!result.ok) {
+      if (result.reason === "NOT_FOUND") {
+        notFound();
+      }
       redirect("/dashboard");
     }
 
-    const rfq = project.quoteRequest;
-    projectName = project.projectName;
-    rfqStatus = rfq?.status ?? "CLOSED";
-    projectEstimate = project.totalEstimate;
-    quotes =
-      rfq?.quotes.map((q) => ({
-        id: q.id,
-        totalPrice: q.totalPrice,
-        brandOffered: q.brandOffered,
-        deliveryDays: q.deliveryDays,
-        details: q.details,
-        status: q.status,
-        createdAt: q.createdAt.toISOString(),
-        dealerName:
-          q.dealer.dealerProfile?.companyName ?? q.dealer.name ?? "Dealer",
-        dealerCity: q.dealer.dealerProfile?.city ?? "",
-        dealerEmail: q.status === "ACCEPTED" ? q.dealer.email : null,
-        dealerPhone: q.status === "ACCEPTED" ? (q.dealer.phone ?? null) : null,
-      })) ?? [];
+    projectName = result.projectName;
+    rfqStatus = result.rfqStatus;
+    projectEstimate = result.projectEstimate;
+    quotes = result.quotes;
   }
 
   const dashboardHref = isDemo ? "/dashboard?demo=true" : "/dashboard";
@@ -210,7 +171,12 @@ export default async function QuotesPage({ params, searchParams }: PageProps) {
           </div>
         )
       ) : (
-        <QuotesClient quotes={quotes} projectEstimate={projectEstimate} />
+        <QuotesClient
+          quotes={quotes}
+          projectEstimate={projectEstimate}
+          rfqStatus={rfqStatus}
+          demoMode={isDemo}
+        />
       )}
     </main>
   );
