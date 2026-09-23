@@ -38,6 +38,8 @@ import {
   StatusChip,
   statusTone,
 } from "@/components/spec-sheet";
+import { BoardScheduleView } from "@/features/calculator/components/BoardScheduleView";
+import type { DistributionSchedule } from "@/features/calculator/boardEngine";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,6 +91,8 @@ interface Props {
   maxQuotes: number;
   isApproved: boolean;
   bom: BomSnapshot | null;
+  /** Derived server-side; null when the stored BOM predates circuit data. */
+  schedule: DistributionSchedule | null;
   fallbackEstimate: number | null;
   existingQuote: {
     id: string;
@@ -150,6 +154,7 @@ export function RfqDetailClient({
   maxQuotes,
   isApproved,
   bom,
+  schedule,
   fallbackEstimate,
   existingQuote,
 }: Props) {
@@ -372,8 +377,16 @@ export function RfqDetailClient({
                 </Section>
               )}
 
+              {/* The parts above are what gets supplied; this is how they are
+                  arranged. A dealer reading a requisition with a board
+                  schedule attached is looking at a specified job, not a
+                  shopping list someone typed out. */}
+              {schedule && (
+                <BoardScheduleView schedule={schedule} sectionIndex={5} />
+              )}
+
               {bom.warnings.length > 0 && (
-                <Section index={5} title="Notes from the Engine">
+                <Section index={6} title="Notes from the Engine">
                   <ul className="divide-y divide-slate-100">
                     {bom.warnings.map((w, i) => (
                       <li

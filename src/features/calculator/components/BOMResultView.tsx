@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Metric, Row, Section, SpecTable } from "@/components/spec-sheet";
+import { buildDistributionSchedule } from "../boardEngine";
+import { BoardScheduleView } from "./BoardScheduleView";
 import type { EnrichedBOMResult } from "../costEngine";
 import type { BOMItem } from "../type";
 
@@ -496,11 +498,21 @@ export function BOMResultView({
     ? result.warnings.filter((w) => !isPhaseWarning(w))
     : result.warnings;
 
+  // Section 4. Sits after the parts schedules because it is the design that
+  // those parts realise — you buy the breakers above, then this says which
+  // one protects what.
+  const schedule = buildDistributionSchedule({
+    circuits: result.circuits,
+    supply: result.phaseDecision.finalRecommendation,
+    maxDemandKw: result.maxDemandKw,
+  });
+
   return (
     <div className="space-y-3">
       <PowerAndCost result={result} />
       <CableSchedule items={result.items} />
       <ConduitAndDistribution items={result.items} />
+      <BoardScheduleView schedule={schedule} sectionIndex={4} />
 
       <ActionBar
         sessionStatus={sessionStatus}

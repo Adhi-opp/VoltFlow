@@ -294,6 +294,57 @@ async function main() {
     },
   });
 
+  // ── Project C: a single-phase board ─────────────────────────────────────
+  //
+  // Both projects above cross the three-phase threshold, so neither exercises
+  // the single-phase board schedule — the stacked-list layout with a DP
+  // incomer, which is what most NCR flats actually get. This is the fixture
+  // for that path. Saved as a DRAFT so it does not add noise to the dealer
+  // board; open it from the homeowner's dashboard.
+
+  const layoutC: LayoutInput = {
+    propertyType: "FLAT",
+    city: "NCR",
+    bedrooms: 1,
+    bathrooms: 1,
+    balconies: 1,
+    totalFloors: 1,
+    approxSqFt: 620,
+    modularKitchen: false,
+    acInBedrooms: false,
+    acInLivingRoom: false,
+    geyserInBathrooms: true,
+  };
+  const bomC = buildBom(layoutC);
+
+  const projectC = await prisma.project.upsert({
+    where: { id: "seed-project-003" },
+    update: { bomData: asJson(bomC), totalEstimate: bomC.pricing.materialCost },
+    create: {
+      id: "seed-project-003",
+      ownerId: homeowner.id,
+      projectName: "1BHK Dwarka — single phase",
+      projectType: "RESIDENTIAL",
+      status: "ESTIMATED",
+      inputData: { source: "SEED", layout: asJson(layoutC) },
+      bomData: asJson(bomC),
+      totalEstimate: bomC.pricing.materialCost,
+    },
+  });
+
+  await prisma.quoteRequest.upsert({
+    where: { projectId: projectC.id },
+    update: {},
+    create: {
+      projectId: projectC.id,
+      status: "DRAFT",
+      visibilityCity: "NCR",
+      maxQuotes: 5,
+      quoteCount: 0,
+      expiresAt: null,
+    },
+  });
+
   // ── PriceIndex — effective dealer rates per metre of copper wire ────────
   //
   // Until this table has rows, loadRateCardFromDb() silently falls back to the
@@ -349,7 +400,11 @@ VoltFlow seed complete.
              ${formatINR(bomB.pricing.materialCost)} · ${bomB.totalConnectedLoadKw.toFixed(2)} kW · ${bomB.items.length} BOM lines
              RFQ OPEN with 0 bids — open this one as the dealer and bid
 
-  Both RFQs close ${rfqExpiryFrom(now).toLocaleString("en-IN")}
+  Project C  seed-project-003  "1BHK Dwarka — single phase"
+             ${formatINR(bomC.pricing.materialCost)} · ${bomC.totalConnectedLoadKw.toFixed(2)} kW · single-phase board
+             DRAFT — the single-phase board-schedule fixture
+
+  Both open RFQs close ${rfqExpiryFrom(now).toLocaleString("en-IN")}
   Bids valid until ${quoteValidUntilFrom(now).toLocaleDateString("en-IN")}
   Rates      ${wireRates.length} PriceIndex rows
 `);

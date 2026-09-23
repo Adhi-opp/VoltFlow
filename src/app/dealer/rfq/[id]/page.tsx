@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { effectiveRfqStatus } from "@/features/quotes/validity";
+import { buildDistributionSchedule } from "@/features/calculator/boardEngine";
+import type { CircuitDefinition } from "@/features/calculator/type";
 import { RfqDetailClient, type BomSnapshot } from "./RfqDetailClient";
 
 export const metadata: Metadata = {
@@ -120,6 +122,44 @@ export function parseBomSnapshot(raw: unknown): BomSnapshot | null {
   };
 }
 
+/**
+ * Recovers CircuitDefinition rows from stored bomData so the board schedule
+ * can be rebuilt.
+ *
+ * The schedule is derived, never persisted — a project saved before the board
+ * engine existed still gets one, and a project saved today gets the current
+ * rules rather than a frozen copy of whatever we shipped that week. Rows
+ * missing the fields the engine needs are dropped rather than defaulted,
+ * because a guessed conductor size would produce a guessed breaker.
+ */
+function parseCircuits(raw: unknown): CircuitDefinition[] {
+  if (!isRecord(raw) || !Array.isArray(raw.circuits)) return [];
+
+  return (raw.circuits as unknown[]).filter(isRecord).flatMap((c) => {
+    const circuitId = typeof c.circuitId === "string" ? c.circuitId : null;
+    const wireGauge = typeof c.wireGauge === "string" ? c.wireGauge : null;
+    const mcbRatingAmps = num(c.mcbRatingAmps);
+
+    if (!circuitId || !wireGauge || mcbRatingAmps == null) return [];
+
+    return [
+      {
+        circuitId,
+        circuitType: String(c.circuitType ?? "POWER_15A"),
+        roomId: String(c.roomId ?? ""),
+        roomName: String(c.roomName ?? "—"),
+        floor: num(c.floor) ?? 0,
+        wireGauge,
+        mcbRatingAmps,
+        pointCount: num(c.pointCount) ?? 0,
+        pointDescription: String(c.pointDescription ?? ""),
+        wireLengthMeters: num(c.wireLengthMeters) ?? 0,
+        conduitLengthMeters: num(c.conduitLengthMeters) ?? 0,
+      } as CircuitDefinition,
+    ];
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -175,6 +215,19 @@ export default async function RfqDetailPage({ params }: PageProps) {
   const bom = parseBomSnapshot(rfq.project.bomData);
   const existingQuote = rfq.quotes[0] ?? null;
 
+  // Derived here rather than in the client: the engine is pure, the result is
+  // plain serialisable data, and doing it server-side keeps the raw circuit
+  // list off the wire.
+  const circuits = parseCircuits(rfq.project.bomData);
+  const schedule =
+    bom && circuits.length > 0
+      ? buildDistributionSchedule({
+          circuits,
+          supply: bom.phase === "THREE" ? "THREE" : "SINGLE",
+          maxDemandKw: bom.maxDemandKw,
+        })
+      : null;
+
   // Dealers without an approved profile can read a requisition but not bid on
   // it — the same rule submitQuoteTransaction enforces, surfaced before the
   // form rather than after a rejected submit.
@@ -195,6 +248,7 @@ export default async function RfqDetailPage({ params }: PageProps) {
       maxQuotes={rfq.maxQuotes}
       isApproved={dealerProfile?.approvalStatus === "APPROVED"}
       bom={bom}
+      schedule={schedule}
       fallbackEstimate={rfq.project.totalEstimate}
       existingQuote={
         existingQuote
