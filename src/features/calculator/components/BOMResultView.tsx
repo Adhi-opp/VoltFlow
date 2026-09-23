@@ -2,301 +2,467 @@
 
 // src/features/calculator/components/BOMResultView.tsx
 // ============================================================================
-// BOM RESULT VIEW — Tabbed display of BOMResult output
+// BOM SPEC SHEET
 // ============================================================================
-// Renders the full output of calculateBOM() in three tabs:
-//   1. BOM Items  — grouped by category, with quantities
-//   2. Load Breakdown — per-room connected load and max demand
-//   3. Circuits   — every circuit with gauge, MCB rating, wire length
+// Read by homeowners checking a quote and by dealers pricing one, so density
+// beats decoration: tabular figures, 1px rules, tight padding, no card
+// shadows. Quantities are shown the way they are actually bought — coils, not
+// loose metres — because "450 m of 2.5 sq mm" is not something anyone can
+// order over a counter.
 //
-// Also renders:
-//   - SummaryBar: 4 stat tiles (Connected Load, Max Demand, Phase, Circuits)
-//   - Warnings panel (amber) when result.warnings.length > 0
-//   - Disclaimer footer
+// Three sections, in the order a job is specified:
+//   1. Power load & service   — what the supply has to carry
+//   2. Cable schedule         — what gets pulled
+//   3. Conduit & distribution — what it runs through and terminates in
+//
+// Circuit schedule and per-room load sit below, collapsed by default.
 // ============================================================================
 
-import { AlertTriangle, Zap, Activity, GitBranch, LayoutGrid } from "lucide-react";
+import type { Role } from "@prisma/client";
+import { AlertTriangle, ChevronDown, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import type { BOMResult, BOMItem } from "../type";
+import { Metric, Row, Section, SpecTable } from "@/components/spec-sheet";
+import { buildDistributionSchedule } from "../boardEngine";
+import { BoardScheduleView } from "./BoardScheduleView";
+import type { EnrichedBOMResult } from "../costEngine";
+import type { BOMItem } from "../type";
 
 // ---------------------------------------------------------------------------
-// Category display config — controls order and labels
-// ---------------------------------------------------------------------------
-
-const CATEGORY_ORDER = [
-  "WIRE",
-  "EARTH_WIRE",
-  "MCB",
-  "RCCB",
-  "MAIN_SWITCH",
-  "DB",
-  "CONDUIT",
-  "SWITCHGEAR",
-] as const;
-
-const CATEGORY_LABELS: Record<string, string> = {
-  WIRE: "Wires",
-  EARTH_WIRE: "Earth Wire",
-  MCB: "MCBs",
-  RCCB: "RCCBs",
-  MAIN_SWITCH: "Main Switch",
-  DB: "Distribution Board",
-  CONDUIT: "Conduit",
-  SWITCHGEAR: "Switchgear",
-};
-
-// ---------------------------------------------------------------------------
-// Helpers
+// Formatting
 // ---------------------------------------------------------------------------
 
 function formatKw(kw: number): string {
   return `${kw.toFixed(2)} kW`;
 }
 
-function getQuantityLabel(item: BOMItem): string {
-  switch (item.category) {
-    case "WIRE":
-      return `${item.totalMeters.toFixed(0)} m (${item.coilsRequired} coil${item.coilsRequired !== 1 ? "s" : ""} × ${item.coilLengthMeters}m)`;
-    case "EARTH_WIRE":
-      return `${item.totalMeters.toFixed(0)} m (${item.coilsRequired} coil${item.coilsRequired !== 1 ? "s" : ""} × ${item.coilLengthMeters}m)`;
-    case "CONDUIT":
-      return `${item.totalMeters.toFixed(0)} m`;
-    default:
-      return `× ${(item as { quantity: number }).quantity}`;
-  }
+function formatINR(amount: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function gaugeLabel(sizeSqMm: number): string {
+  return `${sizeSqMm.toFixed(1)} mm²`;
+}
+
+/**
+ * Strips the engine's parenthetical purpose out of a description:
+ * "1.5 sq mm FR PVC Copper Wire (Lighting)" -> "Lighting".
+ */
+function purposeOf(description: string): string {
+  const match = description.match(/\(([^)]+)\)\s*$/);
+  return match ? match[1] : "—";
 }
 
 // ---------------------------------------------------------------------------
-// SummaryBar
+// Section 1 — Power load & service
 // ---------------------------------------------------------------------------
 
-interface StatTileProps {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  highlight?: boolean;
-}
+function PowerAndCost({ result }: { result: EnrichedBOMResult }) {
+  const isThreePhase = result.phaseDecision.finalRecommendation === "THREE";
+  const { lowEstimate, highEstimate, cableSharePct } = result.pricing;
 
-function StatTile({ icon, label, value, highlight }: StatTileProps) {
   return (
-    <div className="flex flex-col gap-1 rounded-lg border bg-card p-4">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        {icon}
-        <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+    <Section index={1} title="Power Load & Service" meta="Diversified per IS 732">
+      <div className="grid grid-cols-2 divide-y divide-slate-200 sm:grid-cols-4 sm:divide-y-0">
+        <Metric label="Connected Load" value={formatKw(result.totalConnectedLoadKw)} />
+        <Metric label="Max Demand" value={formatKw(result.maxDemandKw)} />
+        <Metric
+          label="Supply"
+          value={isThreePhase ? "3-Phase" : "1-Phase"}
+          accent={isThreePhase}
+        />
+        <Metric label="Circuits" value={String(result.totalCircuits)} />
       </div>
-      <p className={`text-2xl font-bold tabular-nums ${highlight ? "text-amber-500" : ""}`}>
-        {value}
+
+      <div className="border-t border-slate-200 px-3 py-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="spec-label">Estimated Material + Labour</p>
+          <p className="spec-num text-xl font-bold text-slate-900">
+            {formatINR(lowEstimate)}
+            <span className="mx-1.5 font-normal text-slate-400">–</span>
+            {formatINR(highEstimate)}
+          </p>
+        </div>
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+          Lower bound is standard FR cable at current trade rates. Upper bound is
+          the same schedule in FRLS/ZHFR. Cable is{" "}
+          <span className="spec-num">{(cableSharePct * 100).toFixed(0)}%</span> of
+          material here, so grade and copper movement drive the spread.
+        </p>
+      </div>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section 2 — Cable schedule
+// ---------------------------------------------------------------------------
+
+function CableSchedule({ items }: { items: BOMItem[] }) {
+  const cables = items.filter(
+    (i) => i.category === "WIRE" || i.category === "EARTH_WIRE"
+  );
+
+  if (cables.length === 0) {
+    return (
+      <Section index={2} title="Cable Schedule">
+        <p className="px-3 py-6 text-center text-sm text-slate-500">
+          No cable lines generated.
+        </p>
+      </Section>
+    );
+  }
+
+  const totalCoils = cables.reduce((sum, c) => sum + c.coilsRequired, 0);
+
+  return (
+    <Section index={2} title="Cable Schedule" meta={`${totalCoils} coils total`}>
+      <SpecTable head={["Gauge", "Purpose", "Required", "Purchase", "Surplus"]}>
+        {cables.map((cable, idx) => (
+          <Row key={idx}>
+            <td className="px-3 py-2">
+              <span className="spec-num font-semibold text-slate-900">
+                {gaugeLabel(cable.sizeSqMm)}
+              </span>
+              {cable.category === "EARTH_WIRE" && (
+                <span className="ml-1.5 text-[11px] uppercase tracking-wide text-emerald-700">
+                  Earth
+                </span>
+              )}
+            </td>
+            <td className="px-3 py-2 text-right text-slate-600">
+              {cable.category === "EARTH_WIRE" ? "Earthing" : purposeOf(cable.description)}
+            </td>
+            <td className="spec-num px-3 py-2 text-right text-slate-600">
+              {cable.totalMeters.toFixed(0)} m
+            </td>
+            <td className="px-3 py-2 text-right">
+              <span className="spec-num font-semibold text-slate-900">
+                {cable.coilsRequired} × {cable.coilLengthMeters} m
+              </span>
+              <span className="ml-1 text-slate-400">coil</span>
+            </td>
+            <td className="spec-num px-3 py-2 text-right text-slate-500">
+              {cable.surplusMeters.toFixed(0)} m
+            </td>
+          </Row>
+        ))}
+      </SpecTable>
+      <p className="border-t border-slate-200 px-3 py-2 text-xs text-slate-500">
+        Cable is sold in full coils. &ldquo;Purchase&rdquo; is what you actually buy;
+        surplus is the offcut you keep.
+      </p>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section 3 — Conduit & distribution
+// ---------------------------------------------------------------------------
+
+function ConduitAndDistribution({ items }: { items: BOMItem[] }) {
+  const conduit = items.filter((i) => i.category === "CONDUIT");
+  const protection = items.filter(
+    (i) =>
+      i.category === "MCB" ||
+      i.category === "RCCB" ||
+      i.category === "MAIN_SWITCH" ||
+      i.category === "DB"
+  );
+  const accessories = items.filter((i) => i.category === "SWITCHGEAR");
+
+  const conduitMeters = conduit.reduce((s, c) => s + c.totalMeters, 0);
+
+  return (
+    <Section
+      index={3}
+      title="Conduit & Distribution"
+      meta={`${conduitMeters.toFixed(0)} m conduit`}
+    >
+      <SpecTable head={["Item", "Spec", "Qty"]}>
+        {conduit.map((c, idx) => (
+          <Row key={`c-${idx}`}>
+            <td className="px-3 py-2 text-slate-900">PVC Conduit</td>
+            <td className="px-3 py-2 text-right text-slate-600">{c.sizeMm}</td>
+            <td className="spec-num px-3 py-2 text-right font-semibold text-slate-900">
+              {c.totalMeters.toFixed(0)} m
+            </td>
+          </Row>
+        ))}
+        {protection.map((p, idx) => (
+          <Row key={`p-${idx}`}>
+            <td className="px-3 py-2 text-slate-900">
+              {p.category === "MAIN_SWITCH"
+                ? "Main Switch"
+                : p.category === "DB"
+                  ? "Distribution Board"
+                  : p.category}
+            </td>
+            <td className="px-3 py-2 text-right text-slate-600">
+              {p.category === "MCB"
+                ? `${p.ratingAmps}A Type ${p.type}`
+                : p.category === "RCCB"
+                  ? `${p.ratingAmps}A / ${p.sensitivityMa} mA / ${p.poles}P`
+                  : p.category === "MAIN_SWITCH"
+                    ? `${p.ratingAmps}A / ${p.poles}P`
+                    : `${p.ways}-way`}
+            </td>
+            <td className="spec-num px-3 py-2 text-right font-semibold text-slate-900">
+              {p.quantity}
+            </td>
+          </Row>
+        ))}
+        {accessories.map((a, idx) => (
+          <Row key={`a-${idx}`}>
+            <td className="px-3 py-2 text-slate-900">{a.description}</td>
+            <td className="px-3 py-2 text-right text-slate-600">Modular</td>
+            <td className="spec-num px-3 py-2 text-right font-semibold text-slate-900">
+              {a.quantity}
+            </td>
+          </Row>
+        ))}
+      </SpecTable>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Save / auth actions
+// ---------------------------------------------------------------------------
+
+type SessionStatus = "loading" | "authenticated" | "unauthenticated";
+
+interface SaveFeedback {
+  type: "success" | "error";
+  message: string;
+}
+
+function ActionBar({
+  sessionStatus,
+  sessionRole,
+  onSaveProject,
+  onRequestAuth,
+  isSavingProject,
+  activeSaveMode,
+  saveFeedback,
+}: {
+  sessionStatus: SessionStatus;
+  sessionRole: Role | undefined;
+  onSaveProject: (status: "DRAFT" | "OPEN") => void;
+  onRequestAuth: (intent: "DRAFT" | "OPEN") => void;
+  isSavingProject: boolean;
+  activeSaveMode: "DRAFT" | "OPEN" | null;
+  saveFeedback: SaveFeedback | null;
+}) {
+  const isDealer = sessionStatus === "authenticated" && sessionRole === "DEALER";
+  const canSave = sessionStatus === "authenticated" && !isDealer;
+
+  return (
+    <div className="border border-slate-200 bg-slate-50 px-3 py-3">
+      {sessionStatus === "loading" && (
+        <Button disabled className="w-full">
+          Checking account…
+        </Button>
+      )}
+
+      {sessionStatus === "unauthenticated" && (
+        <div className="space-y-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => onRequestAuth("DRAFT")}
+              className="flex-1 bg-white"
+            >
+              Save as Draft
+            </Button>
+            <Button onClick={() => onRequestAuth("OPEN")} className="flex-1">
+              Request Dealer Quotes
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500">
+            Sign in to continue — this spec is kept and picks up where you left off.
+          </p>
+        </div>
+      )}
+
+      {isDealer && (
+        <div className="space-y-1.5">
+          <Button disabled className="w-full">
+            Request Dealer Quotes
+          </Button>
+          <p className="text-xs text-slate-500">
+            Dealer accounts quote on requests rather than creating them.
+          </p>
+        </div>
+      )}
+
+      {canSave && (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            variant="outline"
+            onClick={() => onSaveProject("DRAFT")}
+            disabled={isSavingProject}
+            className="flex-1 bg-white"
+          >
+            {isSavingProject && activeSaveMode === "DRAFT" ? "Saving…" : "Save as Draft"}
+          </Button>
+          <Button
+            onClick={() => onSaveProject("OPEN")}
+            disabled={isSavingProject}
+            className="flex-1"
+          >
+            {isSavingProject && activeSaveMode === "OPEN"
+              ? "Publishing…"
+              : "Request Dealer Quotes"}
+          </Button>
+        </div>
+      )}
+
+      {saveFeedback && (
+        <p
+          className={`mt-2 border px-3 py-2 text-sm ${
+            saveFeedback.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-destructive/40 bg-destructive/10 text-destructive"
+          }`}
+        >
+          {saveFeedback.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Notices
+// ---------------------------------------------------------------------------
+
+function PhaseNotice({ result }: { result: EnrichedBOMResult }) {
+  const isOverride =
+    result.phaseDecision.regulatoryRecommendation === "THREE" &&
+    result.phaseDecision.engineeringRecommendation === "SINGLE";
+
+  if (!isOverride) return null;
+
+  return (
+    <div className="flex gap-2.5 border border-slate-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-slate-600">
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+      <p>
+        <span className="font-medium text-slate-900">3-Phase recommended.</span>{" "}
+        Engineering demand is within single-phase limits (
+        <span className="spec-num">{formatKw(result.maxDemandKw)}</span>), but{" "}
+        {result.phaseDecision.regulatoryPolicyKey} DISCOM policy typically requires
+        3-phase above{" "}
+        <span className="spec-num">
+          {result.phaseDecision.connectedLoadThresholdKw.toFixed(1)} kW
+        </span>{" "}
+        connected load. Yours is{" "}
+        <span className="spec-num">{formatKw(result.totalConnectedLoadKw)}</span>.
       </p>
     </div>
   );
 }
 
-function SummaryBar({ result }: { result: BOMResult }) {
-  const isThreePhase = result.recommendedPhase === "THREE";
+function isPhaseWarning(warning: string): boolean {
+  const n = warning.toLowerCase();
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <StatTile
-        icon={<Zap className="h-4 w-4" />}
-        label="Connected Load"
-        value={formatKw(result.totalConnectedLoadKw)}
-      />
-      <StatTile
-        icon={<Activity className="h-4 w-4" />}
-        label="Max Demand"
-        value={formatKw(result.maxDemandKw)}
-      />
-      <StatTile
-        icon={<GitBranch className="h-4 w-4" />}
-        label="Phase"
-        value={isThreePhase ? "3-Phase" : "Single Phase"}
-        highlight={isThreePhase}
-      />
-      <StatTile
-        icon={<LayoutGrid className="h-4 w-4" />}
-        label="Circuits"
-        value={String(result.totalCircuits)}
-      />
-    </div>
+    n.startsWith("3-phase recommended:") ||
+    n.includes("three-phase supply recommended") ||
+    n.includes("single-phase supply is sufficient")
   );
 }
 
-// ---------------------------------------------------------------------------
-// BOM Items Tab
-// ---------------------------------------------------------------------------
-
-function BOMItemsTab({ items }: { items: BOMItem[] }) {
-  const grouped = new Map<string, BOMItem[]>();
-
-  for (const cat of CATEGORY_ORDER) {
-    const catItems = items.filter((item) => item.category === cat);
-    if (catItems.length > 0) grouped.set(cat, catItems);
-  }
-
-  if (grouped.size === 0) {
-    return <p className="py-8 text-center text-sm text-muted-foreground">No BOM items.</p>;
-  }
-
-  return (
-    <div className="space-y-5">
-      {Array.from(grouped.entries()).map(([cat, catItems]) => (
-        <div key={cat}>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            {CATEGORY_LABELS[cat] ?? cat}
-          </h3>
-          <div className="overflow-hidden rounded-md border">
-            <table className="w-full text-sm">
-              <tbody>
-                {catItems.map((item, idx) => (
-                  <tr
-                    key={idx}
-                    className="border-b last:border-0 hover:bg-muted/40 transition-colors"
-                  >
-                    <td className="px-3 py-2.5 text-foreground">{item.description}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                      {getQuantityLabel(item)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Load Breakdown Tab
-// ---------------------------------------------------------------------------
-
-function LoadBreakdownTab({ result }: { result: BOMResult }) {
-  const { loadBreakdown } = result;
-
-  return (
-    <div className="overflow-hidden rounded-md border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/50">
-            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Room</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Lighting</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Power</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Heavy</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Connected</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Demand</th>
-          </tr>
-        </thead>
-        <tbody>
-          {loadBreakdown.map((row) => (
-            <tr key={row.roomId} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-              <td className="px-3 py-2.5 font-medium">{row.roomName}</td>
-              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                {row.lightingLoadWatts} W
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                {row.powerLoadWatts} W
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                {row.heavyLoadWatts} W
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono">
-                {(row.totalConnectedLoadWatts / 1000).toFixed(2)} kW
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono text-primary">
-                {(row.diversifiedDemandWatts / 1000).toFixed(2)} kW
-              </td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="border-t bg-muted/50 font-semibold">
-            <td className="px-3 py-2.5" colSpan={4}>
-              Total
-            </td>
-            <td className="px-3 py-2.5 text-right font-mono">
-              {formatKw(result.totalConnectedLoadKw)}
-            </td>
-            <td className="px-3 py-2.5 text-right font-mono text-primary">
-              {formatKw(result.maxDemandKw)}
-            </td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Circuits Tab
-// ---------------------------------------------------------------------------
-
-function CircuitsTab({ result }: { result: BOMResult }) {
-  const { circuits } = result;
-
-  return (
-    <div className="overflow-hidden rounded-md border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/50">
-            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Circuit</th>
-            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Room</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Gauge</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">MCB</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Points</th>
-            <th className="px-3 py-2 text-right font-medium text-muted-foreground">Wire (m)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {circuits.map((c) => (
-            <tr key={c.circuitId} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-              <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
-                {c.circuitId}
-              </td>
-              <td className="px-3 py-2.5">{c.roomName}</td>
-              <td className="px-3 py-2.5 text-right font-mono text-xs">
-                {c.wireGauge.replace("SQ_MM_", "").replace("_", ".")} mm²
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono text-xs">
-                {c.mcbRatingAmps}A
-              </td>
-              <td className="px-3 py-2.5 text-right text-muted-foreground">
-                {c.pointCount}
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono">
-                {c.wireLengthMeters.toFixed(1)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Warnings Panel
-// ---------------------------------------------------------------------------
-
-function WarningsPanel({ warnings }: { warnings: string[] }) {
+function Notices({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null;
+
   return (
-    <div className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-          Notices ({warnings.length})
-        </p>
-        <ul className="space-y-0.5">
-          {warnings.map((w, i) => (
-            <li key={i} className="text-xs text-amber-700 dark:text-amber-400">
-              {w}
-            </li>
-          ))}
-        </ul>
+    <Collapsible defaultOpen={false}>
+      <div className="border border-amber-200 bg-amber-50">
+        <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2">
+          <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-amber-800">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+            {warnings.length} notice{warnings.length !== 1 ? "s" : ""}
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-amber-600 transition-transform duration-200 [[data-state=open]>&]:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ul className="space-y-1 border-t border-amber-200 px-3 pb-2.5 pt-2">
+            {warnings.map((w, i) => (
+              <li key={i} className="text-xs leading-relaxed text-amber-900">
+                {w}
+              </li>
+            ))}
+          </ul>
+        </CollapsibleContent>
       </div>
-    </div>
+    </Collapsible>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Engineering detail (collapsed)
+// ---------------------------------------------------------------------------
+
+function CircuitSchedule({ result }: { result: EnrichedBOMResult }) {
+  return (
+    <SpecTable head={["Circuit", "Room", "Gauge", "MCB", "Points", "Cable"]}>
+      {result.circuits.map((c) => (
+        <Row key={c.circuitId}>
+          <td className="spec-num px-3 py-2 text-[11px] text-slate-500">
+            {c.circuitId}
+          </td>
+          <td className="px-3 py-2 text-right text-slate-900">{c.roomName}</td>
+          <td className="spec-num px-3 py-2 text-right text-slate-600">
+            {c.wireGauge.replace("SQ_MM_", "").replace("_", ".")} mm²
+          </td>
+          <td className="spec-num px-3 py-2 text-right text-slate-600">
+            {c.mcbRatingAmps}A
+          </td>
+          <td className="spec-num px-3 py-2 text-right text-slate-600">
+            {c.pointCount}
+          </td>
+          <td className="spec-num px-3 py-2 text-right text-slate-900">
+            {c.wireLengthMeters.toFixed(1)} m
+          </td>
+        </Row>
+      ))}
+    </SpecTable>
+  );
+}
+
+function RoomLoad({ result }: { result: EnrichedBOMResult }) {
+  return (
+    <SpecTable head={["Room", "Lighting", "Power", "Heavy", "Connected", "Demand"]}>
+      {result.loadBreakdown.map((r) => (
+        <Row key={r.roomId}>
+          <td className="px-3 py-2 font-medium text-slate-900">{r.roomName}</td>
+          <td className="spec-num px-3 py-2 text-right text-slate-600">
+            {r.lightingLoadWatts} W
+          </td>
+          <td className="spec-num px-3 py-2 text-right text-slate-600">
+            {r.powerLoadWatts} W
+          </td>
+          <td className="spec-num px-3 py-2 text-right text-slate-600">
+            {r.heavyLoadWatts} W
+          </td>
+          <td className="spec-num px-3 py-2 text-right text-slate-900">
+            {(r.totalConnectedLoadWatts / 1000).toFixed(2)} kW
+          </td>
+          <td className="spec-num px-3 py-2 text-right font-semibold text-emerald-700">
+            {(r.diversifiedDemandWatts / 1000).toFixed(2)} kW
+          </td>
+        </Row>
+      ))}
+    </SpecTable>
   );
 }
 
@@ -305,50 +471,93 @@ function WarningsPanel({ warnings }: { warnings: string[] }) {
 // ---------------------------------------------------------------------------
 
 interface BOMResultViewProps {
-  result: BOMResult;
+  result: EnrichedBOMResult;
+  sessionStatus: SessionStatus;
+  sessionRole: Role | undefined;
+  onSaveProject: (status: "DRAFT" | "OPEN") => void;
+  onRequestAuth: (intent: "DRAFT" | "OPEN") => void;
+  isSavingProject: boolean;
+  activeSaveMode: "DRAFT" | "OPEN" | null;
+  saveFeedback: SaveFeedback | null;
 }
 
-export function BOMResultView({ result }: BOMResultViewProps) {
+export function BOMResultView({
+  result,
+  sessionStatus,
+  sessionRole,
+  onSaveProject,
+  onRequestAuth,
+  isSavingProject,
+  activeSaveMode,
+  saveFeedback,
+}: BOMResultViewProps) {
+  const isOverride =
+    result.phaseDecision.regulatoryRecommendation === "THREE" &&
+    result.phaseDecision.engineeringRecommendation === "SINGLE";
+  const notices = isOverride
+    ? result.warnings.filter((w) => !isPhaseWarning(w))
+    : result.warnings;
+
+  // Section 4. Sits after the parts schedules because it is the design that
+  // those parts realise — you buy the breakers above, then this says which
+  // one protects what.
+  const schedule = buildDistributionSchedule({
+    circuits: result.circuits,
+    supply: result.phaseDecision.finalRecommendation,
+    maxDemandKw: result.maxDemandKw,
+  });
+
   return (
-    <div className="space-y-5">
-      {/* Summary tiles */}
-      <SummaryBar result={result} />
+    <div className="space-y-3">
+      <PowerAndCost result={result} />
+      <CableSchedule items={result.items} />
+      <ConduitAndDistribution items={result.items} />
+      <BoardScheduleView schedule={schedule} sectionIndex={4} />
 
-      {/* Warnings */}
-      <WarningsPanel warnings={result.warnings} />
+      <ActionBar
+        sessionStatus={sessionStatus}
+        sessionRole={sessionRole}
+        onSaveProject={onSaveProject}
+        onRequestAuth={onRequestAuth}
+        isSavingProject={isSavingProject}
+        activeSaveMode={activeSaveMode}
+        saveFeedback={saveFeedback}
+      />
 
-      {/* Tabs */}
-      <Tabs defaultValue="bom">
-        <TabsList className="w-full sm:w-auto">
-          <TabsTrigger value="bom" className="flex-1 sm:flex-none">
-            BOM Items
-          </TabsTrigger>
-          <TabsTrigger value="load" className="flex-1 sm:flex-none">
-            Load Breakdown
-          </TabsTrigger>
-          <TabsTrigger value="circuits" className="flex-1 sm:flex-none">
-            Circuits
-          </TabsTrigger>
-        </TabsList>
+      <PhaseNotice result={result} />
+      <Notices warnings={notices} />
 
-        <TabsContent value="bom" className="mt-4">
-          <BOMItemsTab items={result.items} />
-        </TabsContent>
+      <Collapsible defaultOpen={false}>
+        <div className="border border-slate-200 bg-white">
+          <CollapsibleTrigger className="flex w-full items-center justify-between border-b border-transparent px-3 py-2 data-[state=open]:border-slate-200">
+            <span className="text-[13px] font-semibold uppercase tracking-[0.08em] text-slate-900">
+              Engineering Detail
+            </span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform duration-200 [[data-state=open]>&]:rotate-180" />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <Tabs defaultValue="circuits" className="px-3 py-3">
+              <TabsList className="w-full sm:w-auto">
+                <TabsTrigger value="circuits" className="flex-1 sm:flex-none">
+                  Circuit Schedule
+                </TabsTrigger>
+                <TabsTrigger value="load" className="flex-1 sm:flex-none">
+                  Room Load
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="circuits" className="mt-3 border border-slate-200">
+                <CircuitSchedule result={result} />
+              </TabsContent>
+              <TabsContent value="load" className="mt-3 border border-slate-200">
+                <RoomLoad result={result} />
+              </TabsContent>
+            </Tabs>
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
 
-        <TabsContent value="load" className="mt-4">
-          <LoadBreakdownTab result={result} />
-        </TabsContent>
-
-        <TabsContent value="circuits" className="mt-4">
-          <CircuitsTab result={result} />
-        </TabsContent>
-      </Tabs>
-
-      <Separator />
-
-      {/* Disclaimer */}
-      <p className="text-xs text-muted-foreground">
-        {result.disclaimer} &middot; Generated by algorithm v{result.algorithmVersion} &middot;{" "}
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        {result.disclaimer} · Algorithm v{result.algorithmVersion} ·{" "}
         {new Date(result.generatedAt).toLocaleString("en-IN", {
           dateStyle: "medium",
           timeStyle: "short",

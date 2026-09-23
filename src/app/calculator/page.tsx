@@ -8,12 +8,26 @@
 // ============================================================================
 
 import type { Metadata } from "next";
+import { CalculatorErrorBoundary } from "@/features/calculator/components/CalculatorErrorBoundary";
 import { CalculatorShell } from "@/features/calculator/components/CalculatorShell";
 
 export const metadata: Metadata = {
-  title: "Electrical BOM Calculator — WireMart",
+  title: "Free Electrical Wiring Calculator | IS 732 BOM Estimate",
   description:
-    "Get an IS 732:2019 compliant Bill of Materials for your NCR home — wires, MCBs, conduit, and more. Instant estimate, no sign-up required.",
+    "Calculate your home electrical wiring costs instantly. Bill of Materials aligned with IS 732 standard practice — wires, MCBs, conduit, and more. Estimates only. Get dealer quotes in NCR.",
+  keywords: [
+    "electrical wiring calculator",
+    "BOM calculator India",
+    "IS 732",
+    "home wiring cost",
+    "electrical estimate",
+    "wire gauge calculator",
+  ],
+  openGraph: {
+    title: "Free Electrical Wiring Calculator — VoltFlow",
+    description:
+      "Bill of Materials aligned with IS 732 standard practice. Instant estimates for NCR homes.",
+  },
 };
 
 export default function CalculatorPage() {
@@ -23,13 +37,16 @@ export default function CalculatorPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight">Electrical BOM Calculator</h1>
         <p className="mt-2 text-muted-foreground">
-          IS 732:2019 compliant estimates for NCR residential properties. Select a preset or
-          configure your own layout below.
+          Aligned with IS 732 standard practice — estimates only, not a design
+          document. For NCR residential properties. Select a preset or configure your
+          own layout below.
         </p>
       </div>
 
       {/* Client shell — owns all state and engine calls */}
-      <CalculatorShell />
+      <CalculatorErrorBoundary>
+        <CalculatorShell />
+      </CalculatorErrorBoundary>
     </main>
   );
 }

@@ -10,6 +10,7 @@
 //
 // State:
 //   result          — the last BOMResult, null until first calculation
+//   lastLayout      — the inputs behind `result`; what we save and re-run from
 //   showForm        — toggles between preset view and custom form
 //   formDefaults    — pre-populates form when user clicks "Customize"
 //   activePresetId  — highlights the active preset card
@@ -20,26 +21,72 @@
 //   The BOM engine (calculateBOM, generateRoomSpecsFromLayout) executes
 //   exclusively on the server. No engine code is sent to the browser.
 //   Wrapped in useTransition for React 19 async transition support.
+//
+// Anonymous visitors:
+//   The calculator is public. A logged-out visitor gets the full BOM, and
+//   their layout is stashed in localStorage. Clicking a save button records
+//   the intent and sends them to /login; on return the estimate is re-run and
+//   the save resumes automatically. See @/lib/pending-estimate.
 // ============================================================================
 
-import { useRef, useState, useTransition } from "react";
-import { AlertCircle, ChevronDown, ChevronUp, SlidersHorizontal, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Role } from "@prisma/client";
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, SlidersHorizontal, X } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { createQuoteRequestAction } from "@/features/quotes/actions";
+import {
+  clearPendingEstimate,
+  clearPendingIntent,
+  readPendingEstimate,
+  writePendingIntent,
+  writePendingLayout,
+  type SaveIntent,
+} from "@/lib/pending-estimate";
 import { PresetCards } from "./PresetCards";
 import { CalculatorForm } from "./CalculatorForm";
 import { BOMResultView } from "./BOMResultView";
 import { generateEstimateAction } from "../actions";
-import type { BOMResult } from "../type";
+import type { EnrichedBOMResult } from "../costEngine";
+import type { EstimateActionErrorCode } from "../actions";
 import type { LayoutInput } from "../layoutTypes";
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
+function coerceSessionRole(role: unknown): Role | undefined {
+  switch (role) {
+    case Role.HOMEOWNER:
+    case Role.DEALER:
+    case Role.ADMIN:
+      return role;
+    default:
+      return undefined;
+  }
+}
+
 export function CalculatorShell() {
-  const [result, setResult] = useState<BOMResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const { data: session, status: sessionStatus } = useSession();
+  const normalizedSessionRole = coerceSessionRole(session?.user?.role);
+
+  const [result, setResult] = useState<EnrichedBOMResult | null>(null);
+  const [lastLayout, setLastLayout] = useState<LayoutInput | null>(null);
+  const [error, setError] = useState<{
+    message: string;
+    code: EstimateActionErrorCode;
+    missingCodes?: string[];
+  } | null>(null);
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [activeSaveMode, setActiveSaveMode] = useState<"DRAFT" | "OPEN" | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formDefaults, setFormDefaults] = useState<Partial<LayoutInput> | undefined>(undefined);
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
@@ -47,24 +94,138 @@ export function CalculatorShell() {
 
   const resultRef = useRef<HTMLDivElement>(null);
 
+  // One-shot guards: restore the stash once, resume a pending save once.
+  const hydratedRef = useRef(false);
+  const resumedRef = useRef(false);
+
   // -------------------------------------------------------------------------
   // Engine runner — delegates to Server Action; engine never runs in browser
   // -------------------------------------------------------------------------
 
-  function runEngine(layout: LayoutInput) {
-    setError(null);
-    startTransition(async () => {
-      const res = await generateEstimateAction(layout);
-      if (res.success) {
-        setResult(res.data);
-        requestAnimationFrame(() => {
-          resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const runEngine = useCallback(
+    (layout: LayoutInput, options?: { scroll?: boolean }) => {
+      const shouldScroll = options?.scroll ?? true;
+      setError(null);
+      setSaveFeedback(null);
+      startTransition(async () => {
+        const res = await generateEstimateAction(layout);
+        if (res.success) {
+          setResult(res.data);
+          setLastLayout(layout);
+          // Survive a trip through /login, and a closed tab.
+          writePendingLayout(layout);
+          if (shouldScroll) {
+            requestAnimationFrame(() => {
+              resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+          }
+        } else {
+          setError({
+            message: res.error,
+            code: res.errorCode,
+            missingCodes: res.missingCodes,
+          });
+        }
+      });
+    },
+    []
+  );
+
+  const handleSaveProject = useCallback(
+    async (status: SaveIntent, layoutOverride?: LayoutInput) => {
+      const layout = layoutOverride ?? lastLayout;
+      if (!layout || isSavingProject) return false;
+
+      setSaveFeedback(null);
+      setIsSavingProject(true);
+      setActiveSaveMode(status);
+      try {
+        // The server re-runs the engine from this layout and derives the
+        // price itself — we deliberately do not send the computed BOM.
+        const saved = await createQuoteRequestAction(layout, status);
+        if (saved.success) {
+          clearPendingEstimate();
+          toast.success(
+            status === "DRAFT"
+              ? "Project saved to your dashboard."
+              : "Quote request published to verified dealers."
+          );
+          return true;
+        }
+
+        setSaveFeedback({ type: "error", message: saved.error });
+        return false;
+      } catch {
+        setSaveFeedback({
+          type: "error",
+          message: "Failed to save project. Please try again.",
         });
-      } else {
-        setError(res.error);
+        return false;
+      } finally {
+        setIsSavingProject(false);
+        setActiveSaveMode(null);
       }
-    });
+    },
+    [isSavingProject, lastLayout]
+  );
+
+  // -------------------------------------------------------------------------
+  // Anonymous → authenticated handover
+  // -------------------------------------------------------------------------
+
+  /**
+   * Logged-out visitor clicked a save button: remember what they wanted,
+   * then send them to login. The effect below finishes the job on return.
+   */
+  function handleRequestAuth(intent: SaveIntent) {
+    if (lastLayout) writePendingIntent(lastLayout, intent);
+    router.push(`/login?callbackUrl=${encodeURIComponent("/calculator")}`);
   }
+
+  // Restore a stashed layout once on mount and re-run it at current rates.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+
+    const pending = readPendingEstimate();
+    if (!pending) return;
+
+    setFormDefaults(pending.layout);
+    runEngine(pending.layout, { scroll: false });
+  }, [runEngine]);
+
+  // Resume the save the visitor started before logging in.
+  useEffect(() => {
+    if (resumedRef.current) return;
+    if (sessionStatus !== "authenticated") return;
+    // Wait for the restored estimate to come back before saving.
+    if (!result || !lastLayout) return;
+
+    const pending = readPendingEstimate();
+    if (!pending?.intent) return;
+
+    resumedRef.current = true;
+
+    // Dealers cannot own projects — drop the intent rather than erroring.
+    if (normalizedSessionRole === Role.DEALER) {
+      clearPendingIntent();
+      return;
+    }
+
+    const intent = pending.intent;
+    clearPendingIntent();
+
+    void handleSaveProject(intent, lastLayout).then((ok) => {
+      if (ok) router.push("/dashboard");
+    });
+  }, [
+    sessionStatus,
+    result,
+    lastLayout,
+    normalizedSessionRole,
+    handleSaveProject,
+    router,
+  ]);
 
   // -------------------------------------------------------------------------
   // Preset handlers
@@ -137,6 +298,7 @@ export function CalculatorShell() {
           onSelect={handlePresetSelect}
           onCustomize={handlePresetCustomize}
           activePresetId={activePresetId}
+          disabled={isPending}
         />
       </section>
 
@@ -179,25 +341,58 @@ export function CalculatorShell() {
       {error && (
         <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <div className="space-y-1">
+            <p>{error.message}</p>
+            {error.code === "PRICING_DATA_MISSING" && error.missingCodes && error.missingCodes.length > 0 && (
+              <p className="text-xs">
+                Missing price codes: {error.missingCodes.join(", ")}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
       {/* ------------------------------------------------------------------ */}
       {/* Section 3: Result                                                   */}
       {/* ------------------------------------------------------------------ */}
-      {result && (
+      {(isPending || result) && (
         <section ref={resultRef}>
           <Separator className="mb-6" />
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold">Bill of Materials</h2>
-            <p className="text-sm text-muted-foreground">
-              {result.circuits.length > 0
-                ? `${result.totalCircuits} circuits · IS 732:2019 compliant`
-                : "No circuits generated"}
-            </p>
-          </div>
-          <BOMResultView result={result} />
+
+          {/* First calculation — no prior result, show full-area spinner */}
+          {isPending && !result && (
+            <div className="flex items-center justify-center gap-3 py-16 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Calculating estimate…</span>
+            </div>
+          )}
+
+          {/* Result — dimmed + spinner badge while recalculating, full when idle */}
+          {result && (
+            <div className={isPending ? "pointer-events-none opacity-50 transition-opacity" : "transition-opacity"}>
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">Bill of Materials</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {result.circuits.length > 0
+                      ? `${result.totalCircuits} circuits · aligned with IS 732 practice · estimate only`
+                      : "No circuits generated"}
+                  </p>
+                </div>
+                {isPending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              </div>
+              <BOMResultView
+                result={result}
+                sessionStatus={sessionStatus}
+                sessionRole={normalizedSessionRole}
+                onSaveProject={handleSaveProject}
+                onRequestAuth={handleRequestAuth}
+                isSavingProject={isSavingProject}
+                activeSaveMode={activeSaveMode}
+                saveFeedback={saveFeedback}
+              />
+            </div>
+          )}
         </section>
       )}
     </div>

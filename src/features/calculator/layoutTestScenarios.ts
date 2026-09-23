@@ -311,7 +311,7 @@ function compareScenario(
 // RUN ALL COMPARISONS
 // ============================================================================
 
-console.log("\n  WireMart Layout Bridge Validation");
+console.log("\n  VoltFlow Layout Bridge Validation");
 console.log("  Comparing layout-generated BOM vs manually-defined test scenarios\n");
 
 const results: boolean[] = [];

@@ -27,6 +27,10 @@ import {
   VOLTAGE_DROP,
   type WireGaugeKey,
 } from "./constants";
+import {
+  resolveRegulatoryPhasePolicy,
+  type RegulatoryPolicyResult,
+} from "./regulatoryPolicy";
 
 import type {
   CalculatorInput,
@@ -43,6 +47,7 @@ import type {
   BOMMainSwitch,
   BOMItem,
   BOMResult,
+  PricingCode,
 } from "./type";
 
 const ALGORITHM_VERSION = "1.1.0";
@@ -76,7 +81,7 @@ const WHOLE_HOUSE_DIVERSITY = {
 };
 
 /** Three-phase threshold — standard 2BHK rarely exceeds this */
-const THREE_PHASE_THRESHOLD_KW = 7;
+const ENGINEERING_THREE_PHASE_THRESHOLD_KW = 7;
 
 // ============================================================================
 // HELPERS
@@ -300,6 +305,41 @@ function calculateLoadForRoom(room: RoomSpec): LoadBreakdown {
 // BOM AGGREGATION
 // ============================================================================
 
+function getWirePricingCode(gauge: WireGaugeKey): PricingCode {
+  switch (gauge) {
+    case "1.5":
+      return "WIRE_1_5";
+    case "2.5":
+      return "WIRE_2_5";
+    case "4.0":
+      return "WIRE_4_0";
+    case "6.0":
+      return "WIRE_6_0";
+    case "10.0":
+      return "WIRE_10_0";
+    case "16.0":
+      return "WIRE_16_0";
+    default:
+      throw new Error(`Unsupported wire gauge for pricing: ${gauge}`);
+  }
+}
+
+function getMcbPricingCode(rating: number, type: "B" | "C"): PricingCode {
+  if (rating === 10 && type === "B") return "MCB_10A_B";
+  if (rating === 16 && type === "C") return "MCB_16A_C";
+  if (rating === 20 && type === "C") return "MCB_20A_C";
+  if (rating === 32 && type === "C") return "MCB_32A_C";
+  if (rating === 63 && type === "C") return "MCB_63A_C";
+  throw new Error(`Unsupported MCB for pricing: ${rating}A Type ${type}`);
+}
+
+function getConduitPricingCode(size: string): PricingCode {
+  if (size === "20mm") return "CONDUIT_20";
+  if (size === "25mm") return "CONDUIT_25";
+  if (size === "32mm") return "CONDUIT_32";
+  throw new Error(`Unsupported conduit size for pricing: ${size}`);
+}
+
 function aggregateWires(circuits: CircuitDefinition[]): BOMWireItem[] {
   const wireMap = new Map<WireGaugeKey, number>();
 
@@ -316,13 +356,19 @@ function aggregateWires(circuits: CircuitDefinition[]): BOMWireItem[] {
     const spec = WIRE_GAUGES[gauge];
     const metersWithSafety = rawMeters * SAFETY_MARGIN_MULTIPLIER;
     const coils = Math.ceil(metersWithSafety / spec.coilLengthMeters);
+    const totalMeters = Math.ceil(metersWithSafety);
+    const purchasableMeters = coils * spec.coilLengthMeters;
+    const surplusMeters = Math.max(0, purchasableMeters - totalMeters);
 
     items.push({
       category: "WIRE",
+      pricingCode: getWirePricingCode(gauge),
       wireGauge: gauge,
       sizeSqMm: spec.sizeSqMm,
       description: `${spec.sizeSqMm} sq mm FR PVC Copper Wire`,
-      totalMeters: Math.ceil(metersWithSafety),
+      totalMeters,
+      purchasableMeters,
+      surplusMeters,
       coilsRequired: coils,
       coilLengthMeters: spec.coilLengthMeters,
     });
@@ -337,13 +383,19 @@ function aggregateEarthWire(): BOMEarthWireItem {
   const mainEarthSize = EARTH_WIRE.minSizeSqMm;
   const coilLength = WIRE_GAUGES["2.5"].coilLengthMeters;
   const total = Math.ceil(mainEarthRunMeters * SAFETY_MARGIN_MULTIPLIER);
+  const coilsRequired = Math.ceil(total / coilLength);
+  const purchasableMeters = coilsRequired * coilLength;
+  const surplusMeters = Math.max(0, purchasableMeters - total);
 
   return {
     category: "EARTH_WIRE",
+    pricingCode: "EARTH_WIRE_2_5",
     sizeSqMm: mainEarthSize,
     description: `${mainEarthSize} sq mm Green/Yellow Earth Wire (DB to Earth Pit)`,
     totalMeters: total,
-    coilsRequired: Math.ceil(total / coilLength),
+    purchasableMeters,
+    surplusMeters,
+    coilsRequired,
     coilLengthMeters: coilLength,
   };
 }
@@ -368,6 +420,7 @@ function aggregateMCBs(circuits: CircuitDefinition[]): BOMMCBItem[] {
 
   return Array.from(mcbMap.values()).map((mcb) => ({
     category: "MCB" as const,
+    pricingCode: getMcbPricingCode(mcb.rating, mcb.type),
     ratingAmps: mcb.rating,
     type: mcb.type,
     quantity: mcb.count,
@@ -388,6 +441,7 @@ function aggregateConduit(circuits: CircuitDefinition[]): BOMConduitItem[] {
     const totalMeters = Math.ceil(meters * CONDUIT_WASTAGE_MULTIPLIER);
     return {
       category: "CONDUIT" as const,
+      pricingCode: getConduitPricingCode(size),
       sizeMm: size,
       totalMeters,
       description: `${size} PVC Conduit Pipe`,
@@ -409,10 +463,42 @@ function aggregateSwitchgear(rooms: RoomSpec[]): BOMSwitchgearItem[] {
   }
 
   const items: BOMSwitchgearItem[] = [];
-  if (totalSwitches > 0) items.push({ category: "SWITCHGEAR", itemType: "SWITCH", quantity: totalSwitches, description: "Modular switch (6A/10A)" });
-  if (totalSocket5A > 0) items.push({ category: "SWITCHGEAR", itemType: "SOCKET_5A", quantity: totalSocket5A, description: "5A socket with switch (2-module)" });
-  if (totalSocket15A > 0) items.push({ category: "SWITCHGEAR", itemType: "SOCKET_15A", quantity: totalSocket15A, description: "15A/16A socket with switch (3-module)" });
-  if (totalFanRegulators > 0) items.push({ category: "SWITCHGEAR", itemType: "FAN_REGULATOR", quantity: totalFanRegulators, description: "Electronic fan regulator (2-module)" });
+  if (totalSwitches > 0) {
+    items.push({
+      category: "SWITCHGEAR",
+      pricingCode: "SWITCH_MODULAR_6A_10A",
+      itemType: "SWITCH",
+      quantity: totalSwitches,
+      description: "Modular switch (6A/10A)",
+    });
+  }
+  if (totalSocket5A > 0) {
+    items.push({
+      category: "SWITCHGEAR",
+      pricingCode: "SOCKET_5A_2M",
+      itemType: "SOCKET_5A",
+      quantity: totalSocket5A,
+      description: "5A socket with switch (2-module)",
+    });
+  }
+  if (totalSocket15A > 0) {
+    items.push({
+      category: "SWITCHGEAR",
+      pricingCode: "SOCKET_15A_16A_3M",
+      itemType: "SOCKET_15A",
+      quantity: totalSocket15A,
+      description: "15A/16A socket with switch (3-module)",
+    });
+  }
+  if (totalFanRegulators > 0) {
+    items.push({
+      category: "SWITCHGEAR",
+      pricingCode: "FAN_REGULATOR_2M",
+      itemType: "FAN_REGULATOR",
+      quantity: totalFanRegulators,
+      description: "Electronic fan regulator (2-module)",
+    });
+  }
 
   return items;
 }
@@ -440,7 +526,10 @@ function checkVoltageDropOk(
 // MAIN CALCULATION FUNCTION
 // ============================================================================
 
-export function calculateBOM(input: CalculatorInput): BOMResult {
+export function calculateBOM(
+  input: CalculatorInput,
+  regulatoryOverride?: RegulatoryPolicyResult
+): BOMResult {
   const warnings: string[] = [];
 
   // --- Step 1: Generate circuits (grouped per floor) ---
@@ -480,10 +569,35 @@ export function calculateBOM(input: CalculatorInput): BOMResult {
   const maxDemandKw = diversifiedDemandWatts / ELECTRICAL_CONSTANTS.WATTS_PER_KW;
 
 
-  // --- Step 4: Recommend phase ---
+  // --- Step 4: Recommend phase (engineering + regulatory) ---
+  const engineeringRecommendation: "SINGLE" | "THREE" =
+    maxDemandKw > ENGINEERING_THREE_PHASE_THRESHOLD_KW ? "THREE" : "SINGLE";
+  const regulatoryPolicy = regulatoryOverride ?? resolveRegulatoryPhasePolicy(input);
+  const regulatoryRecommendation: "SINGLE" | "THREE" =
+    totalConnectedLoadKw > regulatoryPolicy.connectedLoadThresholdKw ? "THREE" : "SINGLE";
   const recommendedPhase: "SINGLE" | "THREE" =
-    maxDemandKw > THREE_PHASE_THRESHOLD_KW ? "THREE" : "SINGLE";
-      // --- Calculate feeder current based on diversified demand ---
+    engineeringRecommendation === "THREE" || regulatoryRecommendation === "THREE"
+      ? "THREE"
+      : "SINGLE";
+
+  const phaseReasons: string[] = [];
+  if (engineeringRecommendation === "THREE") {
+    phaseReasons.push(
+      `Engineering demand ${maxDemandKw.toFixed(2)} kW exceeds ${ENGINEERING_THREE_PHASE_THRESHOLD_KW.toFixed(1)} kW threshold.`
+    );
+  }
+  if (regulatoryRecommendation === "THREE") {
+    phaseReasons.push(
+      `Regulatory connected load ${totalConnectedLoadKw.toFixed(2)} kW exceeds ${regulatoryPolicy.connectedLoadThresholdKw.toFixed(1)} kW threshold (${regulatoryPolicy.cityKey}).`
+    );
+  }
+  if (regulatoryRecommendation === "THREE" && engineeringRecommendation === "SINGLE") {
+    warnings.push(
+      `3-Phase recommended: engineering demand is safe at ${maxDemandKw.toFixed(2)} kW, but local DISCOM threshold is ${regulatoryPolicy.connectedLoadThresholdKw.toFixed(1)} kW for connected load; your connected load is ${totalConnectedLoadKw.toFixed(2)} kW.`
+    );
+  }
+
+  // --- Calculate feeder current based on diversified demand ---
 let feederCurrentAmps: number;
 
 if (recommendedPhase === "THREE") {
@@ -503,9 +617,13 @@ if (recommendedPhase === "THREE") {
 feederCurrentAmps *= 1.25;
 
   if (recommendedPhase !== input.supplyPhase) {
-    if (recommendedPhase === "THREE") {
+    if (recommendedPhase === "THREE" && engineeringRecommendation === "THREE") {
       warnings.push(
-        `Maximum demand is ${maxDemandKw.toFixed(1)} kW (exceeds ${THREE_PHASE_THRESHOLD_KW} kW). Three-phase supply recommended.`
+        `Maximum demand is ${maxDemandKw.toFixed(1)} kW (exceeds ${ENGINEERING_THREE_PHASE_THRESHOLD_KW} kW). Three-phase supply recommended.`
+      );
+    } else if (recommendedPhase === "THREE") {
+      warnings.push(
+        `Three-phase supply recommended based on connected load compliance policy (${regulatoryPolicy.cityKey} threshold: ${regulatoryPolicy.connectedLoadThresholdKw.toFixed(1)} kW).`
       );
     } else {
       warnings.push(
@@ -515,11 +633,15 @@ feederCurrentAmps *= 1.25;
   }
 
   // --- Step 5: Add main feeder circuit (meter → DB) ---
+  const minimumFeederGauge: WireGaugeKey = recommendedPhase === "THREE" ? "10.0" : "6.0";
+  const minimumFeederSize = WIRE_GAUGES[minimumFeederGauge].sizeSqMm;
   const feederGauge: WireGaugeKey =
-  (Object.entries(WIRE_GAUGES) as [WireGaugeKey, typeof WIRE_GAUGES[WireGaugeKey]][])
-    .sort((a, b) => a[1].sizeSqMm - b[1].sizeSqMm)
-    .find(([, spec]) => spec.maxCurrentAmps >= feederCurrentAmps)?.[0] ??
-  (recommendedPhase === "THREE" ? "10.0" : "6.0");
+    (Object.entries(WIRE_GAUGES) as [WireGaugeKey, (typeof WIRE_GAUGES)[WireGaugeKey]][])
+      .sort((a, b) => a[1].sizeSqMm - b[1].sizeSqMm)
+      .find(
+        ([, spec]) =>
+          spec.maxCurrentAmps >= feederCurrentAmps && spec.sizeSqMm >= minimumFeederSize
+      )?.[0] ?? minimumFeederGauge;
   const feederLength = 8;
 
   allCircuits.push({
@@ -587,6 +709,10 @@ feederCurrentAmps *= 1.25;
     recommendedPhase === "THREE" ? RCCB_SPECS.THREE_PHASE : RCCB_SPECS.SINGLE_PHASE;
   const rccbItem: BOMRCCBItem = {
     category: "RCCB",
+    pricingCode:
+      rccbSpec.ratingAmps === 40 && rccbSpec.poles === 2
+        ? "RCCB_40A_2P_30MA"
+        : "RCCB_63A_4P_30MA",
     ratingAmps: rccbSpec.ratingAmps,
     poles: rccbSpec.poles,
     sensitivityMa: rccbSpec.sensitivityMa,
@@ -599,6 +725,10 @@ feederCurrentAmps *= 1.25;
     recommendedPhase === "THREE" ? MAIN_SWITCH.THREE_PHASE : MAIN_SWITCH.SINGLE_PHASE;
   const mainSwitchItem: BOMMainSwitch = {
     category: "MAIN_SWITCH",
+    pricingCode:
+      mainSwitchSpec.ratingAmps === 32 && mainSwitchSpec.poles === 2
+        ? "MAIN_SWITCH_32A_DP"
+        : "MAIN_SWITCH_63A_FP",
     ratingAmps: mainSwitchSpec.ratingAmps,
     poles: mainSwitchSpec.poles,
     quantity: 1,
@@ -610,6 +740,7 @@ feederCurrentAmps *= 1.25;
   const dbWays = DB_SIZING.getRequiredWays(totalMCBs);
   const dbItem: BOMDistributionBoard = {
     category: "DB",
+    pricingCode: "DB_GENERIC",
     ways: dbWays,
     description: `${dbWays}-Way ${recommendedPhase === "THREE" ? "TPN" : "SPN"} Distribution Board`,
     quantity: 1,
@@ -641,6 +772,14 @@ feederCurrentAmps *= 1.25;
     totalConnectedLoadKw: Math.round(totalConnectedLoadKw * 100) / 100,
     maxDemandKw: Math.round(maxDemandKw * 100) / 100,
     recommendedPhase,
+    phaseDecision: {
+      engineeringRecommendation,
+      regulatoryRecommendation,
+      finalRecommendation: recommendedPhase,
+      connectedLoadThresholdKw: regulatoryPolicy.connectedLoadThresholdKw,
+      regulatoryPolicyKey: regulatoryPolicy.cityKey,
+      reasons: phaseReasons,
+    },
     totalCircuits: displayCircuits.length,
 
     circuits: displayCircuits,
